@@ -120,31 +120,42 @@ async def error_handler(update: Update, context: CallbackContext):
 
 async def main_menu(update: Update, context: CallbackContext):
     """Manejador para volver al menú principal"""
-    query = update.callback_query
-    await query.answer()
+    try:
+        query = update.callback_query
+        await query.answer()
+        
+        user_name = update.effective_user.first_name or "amigo/a"  
+        mensajes = [  
+            f"¡Hola <b>{user_name}</b>! 🌟\n\n"  
+            "Me alegra verte por aquí otra vez. ¿En qué puedo ayudarte hoy?",  
+            f"<b>{user_name}</b>, ¿listo/a para dar el siguiente paso? 💪\n\n"  
+            "Elige una opción y juntos mejoraremos tus hábitos.",
+            f"¡Buen momento para cuidarse, <b>{user_name}</b>! 🌱\n\n"  
+            "Pequeñas decisiones hoy = Grandes resultados mañana.\n\n"  
+            "¿Qué te apetece trabajar?",
+            f"¡<b>{user_name}</b>! 💙\n\n"  
+            "Recuerda: tu salud es una inversión, no un gasto.\n\n"  
+            "¿Cómo puedo apoyarte hoy?",
+            f"¡Hola de nuevo, <b>{user_name}</b>! 😊\n\n"  
+            "¿Qué aspecto de tu nutrición quieres fortalecer hoy?\n\n"  
+            "• 🥗 Comidas balanceadas\n"  
+            "• 💧 Hidratación\n"      
+        ]  
+        await update.callback_query.edit_message_text(  
+            text=random.choice(mensajes),  
+            reply_markup=main_menu_keyboard(),  
+            parse_mode="HTML"  
+        )
     
-    user_name = update.effective_user.first_name or "amigo/a"  
-    mensajes = [  
-        f"¡Hola <b>{user_name}</b>! 🌟\n\n"  
-        "Me alegra verte por aquí otra vez. ¿En qué puedo ayudarte hoy?",  
-        f"<b>{user_name}</b>, ¿listo/a para dar el siguiente paso? 💪\n\n"  
-        "Elige una opción y juntos mejoraremos tus hábitos.",
-        f"¡Buen momento para cuidarse, <b>{user_name}</b>! 🌱\n\n"  
-        "Pequeñas decisiones hoy = Grandes resultados mañana.\n\n"  
-        "¿Qué te apetece trabajar?",
-        f"¡<b>{user_name}</b>! 💙\n\n"  
-        "Recuerda: tu salud es una inversión, no un gasto.\n\n"  
-        "¿Cómo puedo apoyarte hoy?",
-        f"¡Hola de nuevo, <b>{user_name}</b>! 😊\n\n"  
-        "¿Qué aspecto de tu nutrición quieres fortalecer hoy?\n\n"  
-        "• 🥗 Comidas balanceadas\n"  
-        "• 💧 Hidratación\n"      
-    ]  
-    await update.callback_query.edit_message_text(  
-        text=random.choice(mensajes),  
-        reply_markup=main_menu_keyboard(),  
-        parse_mode="HTML"  
-    )  
+    except Exception as e:
+        # Si falla (porque no hay mensaje para editar), envía uno nuevo
+        await update.callback_query.edit_message_text(  
+            text=random.choice(mensajes),  
+            reply_markup=main_menu_keyboard(),  
+            parse_mode="HTML"  
+        )
+
+      
 
 
 def setup_handlers(application):
