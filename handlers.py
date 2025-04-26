@@ -20,7 +20,8 @@ from water_reminders import (
 from nutrition_plans import handle_nutrition_plan_selection, send_random_plan
 from premium import handle_premium_payment
 from water_reminders import handle_weight_input
-
+from datetime import datetime
+import random
 
 # Configuración de logging
 logging.basicConfig(
@@ -29,7 +30,46 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+#validacion de hora para el saludo
 
+def obtener_saludo_por_hora():
+    hora_actual = datetime.now().hour
+    if 5 <= hora_actual < 12:
+        return "☀️ Buenos días"
+    elif 12 <= hora_actual < 19:
+        return "🌤 Buenas tardes"
+    else:
+        return "🌙 Buenas noches"
+#validacion de hora para el saludo
+
+#array de mensajes nutricionales para el saludo
+MENSAJES_NUTRICIONALES = [
+    # 1. Enfoque: Hidratación (mañana/tarde/noche)
+    "{saludo}, {user_name}! 💧\n\n¿Ya tomaste tu primer vaso de agua hoy? La hidratación es clave para tu metabolismo. ¡Vamos a registrar tu consumo!",
+    
+    # 2. Enfoque: Metas diarias
+    "{saludo}, {user_name}! 🎯\n\nHoy es un gran día para cumplir tus metas nutricionales. ¿Quieres revisar tu plan de comidas?",
+    
+    # 3. Enfoque: Frutas/verduras
+    "{saludo}, {user_name}! 🥕\n\n¿Incluiste vegetales en tu última comida? Te ayudo a planear una cena balanceada.",
+    
+    # 4. Enfoque: Proteínas
+    "{saludo}, {user_name}! 🍛\n\nLas proteínas son esenciales para tu energía. ¿Qué fuente proteica consumiste hoy?",
+    
+    # 5. Enfoque: Planificación
+    "{saludo}, {user_name}! 📅\n\n¿Planificaste tus comidas para hoy? Evita decisiones impulsivas. ¡Aquí estoy para ayudarte!",
+    
+    # 6. Enfoque: Hábitos
+    "{saludo}, {user_name}! 🔍\n\nPequeños cambios = Grandes resultados. ¿Quieres evaluar tus hábitos esta semana?",
+    
+    # 7. Enfoque: Motivación científica
+    "{saludo}, {user_name}! 📚\n\n¿Sabías que una alimentación balanceada mejora tu productividad? ¡Hagámoslo simple!",
+    
+    # 8. Enfoque: Cena saludable (nocturno)
+    "{saludo}, {user_name}! 🌙\n\nUna cena ligera ayuda a tu digestión. ¿Necesitas ideas saludables para hoy?"
+]    
+#array de mensajes nutricionales para el saludo    
+    
 async def start(update: Update, context: CallbackContext):
     """Manejador del comando /start - Registra al usuario y muestra el menú principal"""
     try:
@@ -48,11 +88,23 @@ async def start(update: Update, context: CallbackContext):
             db.add(db_user)
             db.commit()
         
+        # Obtenemos el nombre del usuario (con fallback por si first_name es None)
+        user_name = update.effective_user.first_name or "NutriAmigo/a"
+        saludo = obtener_saludo_por_hora()
+
+        # Ajusta el mensaje 8 si es de noche (prioriza cenas saludables)
+        hora_actual = datetime.now().hour
+        if hora_actual >= 19 or hora_actual < 5:
+            mensaje = MENSAJES_NUTRICIONALES[7].format(saludo=saludo, user_name=user_name)
+        else:
+            mensaje = random.choice(MENSAJES_NUTRICIONALES[:7]).format(saludo=saludo, user_name=user_name)
+        
         await update.message.reply_text(
-            "¡Bienvenido a tu Agente Personal de Nutrición! 👋\n\n"
-            "Selecciona una opción del menú:",
-            reply_markup=main_menu_keyboard()
-        )
+        mensaje,
+        reply_markup=main_menu_keyboard(),
+        parse_mode="HTML"  # Cambiado a HTML
+    )
+
     except Exception as e:
         logger.error(f"Error en start: {e}")
         if update.message:
@@ -71,10 +123,28 @@ async def main_menu(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
     
-    await query.edit_message_text(
-        "Menú principal:",
-        reply_markup=main_menu_keyboard()
-    )
+    user_name = update.effective_user.first_name or "amigo/a"  
+    mensajes = [  
+        f"¡Hola <b>{user_name}</b>! 🌟\n\n"  
+        "Me alegra verte por aquí otra vez. ¿En qué puedo ayudarte hoy?",  
+        f"<b>{user_name}</b>, ¿listo/a para dar el siguiente paso? 💪\n\n"  
+        "Elige una opción y juntos mejoraremos tus hábitos.",
+        f"¡Buen momento para cuidarse, <b>{user_name}</b>! 🌱\n\n"  
+        "Pequeñas decisiones hoy = Grandes resultados mañana.\n\n"  
+        "¿Qué te apetece trabajar?",
+        f"¡<b>{user_name}</b>! 💙\n\n"  
+        "Recuerda: tu salud es una inversión, no un gasto.\n\n"  
+        "¿Cómo puedo apoyarte hoy?",
+        f"¡Hola de nuevo, <b>{user_name}</b>! 😊\n\n"  
+        "¿Qué aspecto de tu nutrición quieres fortalecer hoy?\n\n"  
+        "• 🥗 Comidas balanceadas\n"  
+        "• 💧 Hidratación\n"      
+    ]  
+    await update.callback_query.edit_message_text(  
+        text=random.choice(mensajes),  
+        reply_markup=main_menu_keyboard(),  
+        parse_mode="HTML"  
+    )  
 
 
 def setup_handlers(application):
