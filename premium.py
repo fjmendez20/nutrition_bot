@@ -1,4 +1,4 @@
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext
 from database import get_db_session, User, Payment
 from keyboards import premium_options_keyboard
@@ -8,12 +8,17 @@ from config import Config
 
 stripe.api_key = Config.STRIPE_API_KEY
 
-def handle_premium_payment(update: Update, context: CallbackContext):
+async def handle_premium_payment(update: Update, context: CallbackContext):
     """Muestra las opciones de pago para premium"""
     query = update.callback_query
-    query.answer()
+    if query is None:
+        # Si no es una callback query, responder adecuadamente
+        await update.message.reply_text("Por favor usa los botones del menú para interactuar con el bot.")
+        return
     
-    query.edit_message_text(
+    await query.answer()
+    
+    await query.edit_message_text(
         "🌟 ¡Conviértete en usuario Premium! 🌟\n\n"
         "Beneficios:\n"
         "✅ Descargas ilimitadas de planes nutricionales\n"
@@ -49,17 +54,17 @@ def create_stripe_payment_link(user_id: int):
         print(f"Error al crear sesión de Stripe: {e}")
         return None
 
-def handle_payment_method(update: Update, context: CallbackContext):
+async def handle_payment_method(update: Update, context: CallbackContext):
     """Maneja la selección del método de pago"""
     query = update.callback_query
-    query.answer()
+    await query.answer()
     payment_method = query.data.split('_')[1]
     user_id = query.from_user.id
     
     if payment_method == 'credit_card':
         payment_url = create_stripe_payment_link(user_id)
         if payment_url:
-            query.edit_message_text(
+            await query.edit_message_text(
                 "💳 Pago con tarjeta de crédito\n\n"
                 "Haz clic en el siguiente enlace para completar tu pago seguro con Stripe:",
                 reply_markup=InlineKeyboardMarkup([
@@ -68,7 +73,7 @@ def handle_payment_method(update: Update, context: CallbackContext):
                 ])
             )
         else:
-            query.edit_message_text(
+            await query.edit_message_text(
                 "⚠️ Error al procesar el pago. Por favor, inténtalo de nuevo más tarde.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menú principal", callback_data='main_menu')]])
             )

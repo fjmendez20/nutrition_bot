@@ -19,10 +19,10 @@ class Config:
     
     # Google Drive (para los PDFs)
     GOOGLE_DRIVE_FOLDER_IDS = {
-        'weight_loss': 'ID_CARPETA_DRIVE',
-        'weight_gain': 'ID_CARPETA_DRIVE',
-        'maintenance': 'ID_CARPETA_DRIVE',
-        'sports': 'ID_CARPETA_DRIVE',
-        'metabolic': 'ID_CARPETA_DRIVE',
-        'aesthetic': 'ID_CARPETA_DRIVE'
+        'weight_loss': '18cYQJs4vGg1MxFSIMCsjL3mA-oRT-enR',
+        'weight_gain': '1IGzHUejlRecVUPoumJG1yzcI5lwtul7q',
+        'maintenance': '19qBf8nY5uEjq9pvPaXlCe4VwobdfZVo4',
+        'sports': '1YXE-1d88E-AhBEPMcaGKft1jL81paLLD',
+        'metabolic': '1xx3HONuEvSj4R7OsJMj8V3r5f-KET74B',
+        'aesthetic': '1kpk9XN7n5vThzJ2ALchYIvRciE3WzwMu'
     }
