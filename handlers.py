@@ -73,12 +73,14 @@ MENSAJES_NUTRICIONALES = [
 async def start(update: Update, context: CallbackContext):
     """Manejador del comando /start - Registra al usuario y muestra el menú principal"""
     try:
+        logger.info(f"Nuevo start recibido de {update.effective_user.id}")
         db = get_db_session()
         user = update.effective_user
         
-        # Registrar usuario en la base de datos si no existe
+        logger.info(f"Buscando usuario {user.id} en DB")
         db_user = db.query(User).filter_by(telegram_id=user.id).first()
         if not db_user:
+            logger.info(f"Usuario nuevo detectado, registrando...")
             db_user = User(
                 telegram_id=user.id,
                 username=user.username,
@@ -87,23 +89,28 @@ async def start(update: Update, context: CallbackContext):
             )
             db.add(db_user)
             db.commit()
+            logger.info(f"Usuario {user.id} registrado en DB")
         
-        # Obtenemos el nombre del usuario (con fallback por si first_name es None)
         user_name = update.effective_user.first_name or "NutriAmigo/a"
         saludo = obtener_saludo_por_hora()
-
-        # Ajusta el mensaje 8 si es de noche (prioriza cenas saludables)
         hora_actual = datetime.now().hour
+        
         if hora_actual >= 19 or hora_actual < 5:
             mensaje = MENSAJES_NUTRICIONALES[7].format(saludo=saludo, user_name=user_name)
         else:
             mensaje = random.choice(MENSAJES_NUTRICIONALES[:7]).format(saludo=saludo, user_name=user_name)
         
+        logger.info(f"Enviando mensaje de bienvenida a {user.id}")
         await update.message.reply_text(
-        mensaje,
-        reply_markup=main_menu_keyboard(),
-        parse_mode="HTML"  # Cambiado a HTML
-    )
+            mensaje,
+            reply_markup=main_menu_keyboard(),
+            parse_mode="HTML"
+        )
+
+    except Exception as e:
+        logger.error(f"Error en start: {e}", exc_info=True)
+        if update.message:
+            await update.message.reply_text("Ocurrió un error. Por favor, inténtalo de nuevo.")
 
     except Exception as e:
         logger.error(f"Error en start: {e}")

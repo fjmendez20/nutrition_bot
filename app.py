@@ -50,14 +50,17 @@ async def webhook():
 @app.route('/webhook_info', methods=['GET'])
 async def webhook_info():
     """Obtiene información del webhook actual"""
-    info = await application.bot.get_webhook_info()
-    return jsonify({
-        "url": info.url,
-        "has_custom_certificate": info.has_custom_certificate,
-        "pending_update_count": info.pending_update_count,
-        "last_error_date": info.last_error_date,
-        "last_error_message": info.last_error_message
-    })
+    try:
+        info = await application.bot.get_webhook_info()
+        return jsonify({
+            "url": info.url,
+            "pending_update_count": info.pending_update_count,
+            "last_error_date": info.last_error_date,
+            "last_error_message": info.last_error_message,
+            "status": "active" if info.url else "inactive"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 async def setup():
     """Configuración inicial"""
