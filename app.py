@@ -14,23 +14,21 @@ logger = logging.getLogger(__name__)
 async def setup_webhook(application):
     """Configura el webhook en Telegram"""
     webhook_url = f"https://{Config.RENDER_DOMAIN}/webhook"
-    secret_token = Config.WEBHOOK_SECRET  # Añade esto a tu config.py
-    
     await application.bot.set_webhook(
         url=webhook_url,
-        secret_token=secret_token,
+        secret_token=Config.WEBHOOK_SECRET,
         drop_pending_updates=True
     )
     logger.info(f"Webhook configurado en: {webhook_url}")
 
 async def main():
     try:
-        # Construye la aplicación
+        # Construye la aplicación CON Updater
         application = (
             ApplicationBuilder()
             .token(Config.TELEGRAM_TOKEN)
             .arbitrary_callback_data(True)
-            .updater(None)  # Importante: desactiva el polling
+            # ¡NO uses .updater(None) aquí!
             .build()
         )
         
@@ -44,7 +42,7 @@ async def main():
         # Inicia el servidor webhook
         await application.run_webhook(
             listen="0.0.0.0",
-            port=int(os.getenv("PORT", 8080)),  # Render usa el puerto 8080
+            port=int(os.getenv("PORT", 8080)),
             secret_token=Config.WEBHOOK_SECRET,
             webhook_url=f"https://{Config.RENDER_DOMAIN}/webhook"
         )
