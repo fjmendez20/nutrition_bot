@@ -1,7 +1,7 @@
-from telegram.ext import ApplicationBuilder
+from telegram.ext import ApplicationBuilder, Application
+from telegram import Update
 from config import Config
 import logging
-import asyncio
 import os
 from flask import Flask, request, jsonify
 
@@ -15,8 +15,11 @@ logger = logging.getLogger(__name__)
 # Inicialización de Flask
 app = Flask(__name__)
 
-# Crear la aplicación del bot (global para acceso desde Flask)
-application = (
+# Obtener puerto de Render o usar 8081 por defecto
+PORT = int(os.environ.get('PORT', 8081))
+
+# Crear la aplicación del bot
+application: Application = (
     ApplicationBuilder()
     .token(Config.TELEGRAM_TOKEN)
     .arbitrary_callback_data(True)
@@ -53,18 +56,15 @@ async def set_webhook():
     )
     logger.info(f"Webhook configurado en: {webhook_url}")
 
-def run_flask():
-    """Inicia el servidor Flask"""
-    app.run(host='0.0.0.0', port=8081)
-
 def main():
     # Configurar el webhook al iniciar
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(set_webhook())
     
-    # Iniciar Flask (ya no en segundo plano)
-    run_flask()
+    # Iniciar Flask
+    app.run(host='0.0.0.0', port=PORT)
 
 if __name__ == '__main__':
+    import asyncio
     main()
