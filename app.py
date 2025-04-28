@@ -6,6 +6,7 @@ import os
 from flask import Flask, request, jsonify
 import asyncio
 from threading import Thread
+from waitress import serve
 
 # Configuración de logging
 logging.basicConfig(
@@ -15,7 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-PORT = int(os.environ.get('PORT', 10000))  # Render usa 10000 por defecto
+PORT = int(os.environ.get('PORT', 8000))  # Render usa el puerto de la variable $PORT
 
 # Inicialización del bot
 application: Application = (
@@ -34,8 +35,8 @@ def home():
     return "¡Bot activo! Ver /webhook_info para estado del webhook"
 
 @app.route('/webhook', methods=['POST'])
-async def webhook():
-    """Endpoint para actualizaciones de Telegram"""
+def webhook():
+    """Endpoint para actualizaciones de Telegram (versión síncrona)"""
     if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != Config.WEBHOOK_SECRET:
         logger.warning("Intento de acceso no autorizado al webhook")
         return "Unauthorized", 401
@@ -43,7 +44,12 @@ async def webhook():
     try:
         json_data = request.get_json()
         update = Update.de_json(json_data, application.bot)
-        await application.update_queue.put(update)  # Método recomendado para PTB v20+
+        
+        # Usamos run_until_complete para manejar la corutina en el hilo principal
+        asyncio.run_coroutine_threadsafe(
+            application.process_update(update),
+            application.updater._event_loop
+        )
         return "ok", 200
     except Exception as e:
         logger.error(f"Error procesando update: {e}", exc_info=True)
@@ -51,11 +57,11 @@ async def webhook():
 
 @app.route('/webhook_info', methods=['GET'])
 def webhook_info():
-    """Obtiene información del webhook actual (síncrono para Flask)"""
+    """Obtiene información del webhook actual"""
     try:
         info = asyncio.run_coroutine_threadsafe(
             application.bot.get_webhook_info(),
-            application.updater._event_loop  # Acceso al event loop
+            application.updater._event_loop
         ).result()
         
         return jsonify({
@@ -75,28 +81,31 @@ async def setup_webhook():
         url=webhook_url,
         secret_token=Config.WEBHOOK_SECRET,
         drop_pending_updates=True,
-        allowed_updates=["message", "callback_query"]  # Especifica los updates que necesitas
+        allowed_updates=["message", "callback_query"]
     )
     logger.info(f"Webhook configurado en: {webhook_url}")
     logger.info(f"Webhook info: {await application.bot.get_webhook_info()}")
 
 def run_flask():
-    """Inicia Flask en el puerto correcto"""
-    # Usar waitress como servidor de producción (añádelo a requirements.txt)
-    from waitress import serve
+    """Inicia Flask con Waitress"""
+    logger.info(f"Iniciando servidor en puerto {PORT}")
     serve(app, host='0.0.0.0', port=PORT)
 
 def run_bot():
     """Inicia el bot en un event loop separado"""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    
+    # Configura el webhook antes de iniciar
     loop.run_until_complete(setup_webhook())
-    loop.run_forever()  # Mantiene el bot activo
+    
+    # Mantiene el bot activo
+    loop.run_forever()
 
 if __name__ == '__main__':
-    # Hilo para el bot (PTB necesita su propio event loop)
+    # Hilo para el bot
     bot_thread = Thread(target=run_bot, daemon=True)
     bot_thread.start()
     
-    # Inicia Flask (en el hilo principal)
+    # Inicia Flask en el hilo principal
     run_flask()
