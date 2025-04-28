@@ -1,6 +1,6 @@
-python-telegram-bot>=20.0
-Flask>=2.0
-waitress>=2.0
+python-telegram-bot==20.3
+Flask==2.2.3
+waitress==2.1.2
 python-dotenv==1.0.0
 httpx~=0.24.0
 sqlalchemy==2.0.19

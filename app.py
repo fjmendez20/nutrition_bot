@@ -7,6 +7,7 @@ from flask import Flask, request, jsonify
 import asyncio
 from threading import Thread
 from waitress import serve
+from asyncio import AbstractEventLoop
 
 # Configuración de logging
 logging.basicConfig(
@@ -16,7 +17,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-PORT = int(os.environ.get('PORT', 8000))  # Render usa el puerto de la variable $PORT
+PORT = int(os.environ.get('PORT', 8000))
 
 # Inicialización del bot
 application: Application = (
@@ -25,6 +26,9 @@ application: Application = (
     .arbitrary_callback_data(True)
     .build()
 )
+
+# Variable global para el event loop
+bot_event_loop: AbstractEventLoop = None
 
 # Handlers
 from handlers import setup_handlers
@@ -36,7 +40,7 @@ def home():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Endpoint para actualizaciones de Telegram (versión síncrona)"""
+    """Endpoint para actualizaciones de Telegram"""
     if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != Config.WEBHOOK_SECRET:
         logger.warning("Intento de acceso no autorizado al webhook")
         return "Unauthorized", 401
@@ -45,10 +49,10 @@ def webhook():
         json_data = request.get_json()
         update = Update.de_json(json_data, application.bot)
         
-        # Usamos run_until_complete para manejar la corutina en el hilo principal
+        # Procesamos el update en el event loop del bot
         asyncio.run_coroutine_threadsafe(
             application.process_update(update),
-            application.updater._event_loop
+            bot_event_loop
         )
         return "ok", 200
     except Exception as e:
@@ -61,7 +65,7 @@ def webhook_info():
     try:
         info = asyncio.run_coroutine_threadsafe(
             application.bot.get_webhook_info(),
-            application.updater._event_loop
+            bot_event_loop
         ).result()
         
         return jsonify({
@@ -93,14 +97,16 @@ def run_flask():
 
 def run_bot():
     """Inicia el bot en un event loop separado"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    global bot_event_loop
+    
+    bot_event_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(bot_event_loop)
     
     # Configura el webhook antes de iniciar
-    loop.run_until_complete(setup_webhook())
+    bot_event_loop.run_until_complete(setup_webhook())
     
     # Mantiene el bot activo
-    loop.run_forever()
+    bot_event_loop.run_forever()
 
 if __name__ == '__main__':
     # Hilo para el bot
