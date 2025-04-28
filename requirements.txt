@@ -1,7 +1,7 @@
 python-telegram-bot==20.3
 Flask==2.3.2
 python-dotenv==1.0.0
-httpx==0.25.0
+httpx~=0.24.0
 sqlalchemy==2.0.19
 python-dotenv==1.0.0
 stripe==5.5.0
