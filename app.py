@@ -1,64 +1,62 @@
-from telegram.ext import ApplicationBuilder  # Cambia esto
+from telegram.ext import ApplicationBuilder
 from config import Config
-from threading import Thread
 import logging
 import asyncio
+import os
 
+# Configuración de logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
+async def setup_webhook(application):
+    """Configura el webhook en Telegram"""
+    webhook_url = f"https://{Config.RENDER_DOMAIN}/webhook"
+    secret_token = Config.WEBHOOK_SECRET  # Añade esto a tu config.py
+    
+    await application.bot.set_webhook(
+        url=webhook_url,
+        secret_token=secret_token,
+        drop_pending_updates=True
+    )
+    logger.info(f"Webhook configurado en: {webhook_url}")
+
 async def main():
     try:
+        # Construye la aplicación
         application = (
-        ApplicationBuilder()
-        .token(Config.TELEGRAM_TOKEN)
-        .arbitrary_callback_data(True)  # Opcional pero recomendado
-        .build()
-    )
+            ApplicationBuilder()
+            .token(Config.TELEGRAM_TOKEN)
+            .arbitrary_callback_data(True)
+            .updater(None)  # Importante: desactiva el polling
+            .build()
+        )
         
+        # Registra los handlers
         from handlers import setup_handlers
         setup_handlers(application)
         
-        logger.info("Starting bot in polling mode...")
-        await application.initialize()
-        await application.start()
-        await application.updater.start_polling()
+        # Configura el webhook
+        await setup_webhook(application)
         
-        logger.info("Bot is running. Press Ctrl+C to stop.")
-        while True:
-            await asyncio.sleep(1)
-            
-    except asyncio.CancelledError:
-        pass
+        # Inicia el servidor webhook
+        await application.run_webhook(
+            listen="0.0.0.0",
+            port=int(os.getenv("PORT", 8080)),  # Render usa el puerto 8080
+            secret_token=Config.WEBHOOK_SECRET,
+            webhook_url=f"https://{Config.RENDER_DOMAIN}/webhook"
+        )
+        
     except Exception as e:
-        logger.error(f"Error: {e}")
-    finally:
-        if 'application' in locals():
-            await application.updater.stop()
-            await application.stop()
-            await application.shutdown()
+        logger.error(f"Error crítico: {e}")
+        raise
 
 if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+        logger.info("Bot detenido manualmente")
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
-        
-    #if Config.WEBHOOK_URL:
-    #    await application.run_webhook(
-    #        listen='0.0.0.0',
-    #        port=8443,
-    #        url_path=Config.TELEGRAM_TOKEN,
-    #        webhook_url=f"{Config.WEBHOOK_URL}/{Config.TELEGRAM_TOKEN}",
-    #        cert='cert.pem'  # Necesario para HTTPS
-    #    )
-    #    logger.info("Bot running in webhook mode")
-    #else:
-    #    await application.run_polling()
-    #    logger.info("Bot running in polling mode")
-
+        logger.error(f"Error fatal: {e}")

@@ -6,7 +6,8 @@ load_dotenv()  # Carga las variables del archivo .env
 class Config:
     # Token de tu bot de Telegram
     TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-    
+    WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET') # Ej: "A1B2-C3D4-E5F6"
+    RENDER_DOMAIN = os.getenv('WEBHOOK_SECRET')  # Tu dominio en Render
     # URL para el webhook (debes configurar esto en tu servidor)
     WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://tudominio.com/webhook')
     
