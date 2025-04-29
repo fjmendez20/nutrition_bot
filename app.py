@@ -60,18 +60,30 @@ class BotManager:
         logger.info(f"Webhook configurado en: {webhook_url}")
 
     async def process_update(self, update_data):
-        """Procesa una actualización"""
+        """Procesa una actualización con manejo de errores mejorado"""
         try:
             if not self.initialized:
                 self.initialize()
                 await self.application.initialize()
                 await self.application.start()
                 
+            # Verifica y completa los datos del usuario si es necesario
+            if 'message' in update_data and 'from' in update_data['message']:
+                if 'is_bot' not in update_data['message']['from']:
+                    update_data['message']['from']['is_bot'] = False
+            
             update = Update.de_json(update_data, self.application.bot)
+            
+            if update is None:
+                logger.error("No se pudo crear el objeto Update")
+                return False
+                
             await self.application.process_update(update)
             return True
+            
         except Exception as e:
             logger.error(f"Error procesando update: {str(e)}", exc_info=True)
+            logger.error(f"Datos del update recibido: {update_data}")
             return False
 
 # Instancia global del bot
@@ -89,8 +101,13 @@ def webhook():
         return "Unauthorized", 401
     
     try:
-        update_queue.put(request.get_json())
+        update_data = request.get_json()
+        logger.info(f"Update recibido: {update_data}")  # Log para diagnóstico
+        
+        # Añadir a la cola para procesamiento
+        update_queue.put(update_data)
         return "ok", 200
+        
     except Exception as e:
         logger.error(f"Error en webhook: {str(e)}", exc_info=True)
         return "server error", 500
