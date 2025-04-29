@@ -9,7 +9,7 @@ class Config:
     WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET') # Ej: "A1B2-C3D4-E5F6"
     RENDER_DOMAIN = os.getenv('RENDER_DOMAIN')  # Tu dominio en Render
     # URL para el webhook (debes configurar esto en tu servidor)
-    WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://tudominio.com/webhook')
+    WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://nutrition-bot-y646.onrender.com/')
     
     # Configuración de la base de datos
     DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///nutrition_bot.db')
