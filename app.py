@@ -1,41 +1,23 @@
 from telegram.ext import ApplicationBuilder
-from telegram import Update, User, Chat, Message
+from telegram import Update
 from config import Config
 import logging
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request
 from waitress import serve
 import asyncio
 import threading
 import queue
-from concurrent.futures import ThreadPoolExecutor
-from flask_sqlalchemy import SQLAlchemy
 
-# Configuración avanzada de logging
+# Configuración de logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Configuración de la aplicación Flask
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///bot.db')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 PORT = int(os.environ.get('PORT', 10000))
-
-# Base de datos
-db = SQLAlchemy(app)
-
-# Modelo de ejemplo para almacenamiento de datos
-class UserInteraction(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer)
-    command = db.Column(db.String(50))
-    timestamp = db.Column(db.DateTime)
-
-# Pool de threads para manejo concurrente
-executor = ThreadPoolExecutor(max_workers=4)
 
 # Cola para procesar updates
 update_queue = queue.Queue()
@@ -62,142 +44,86 @@ class BotManager:
         logger.info("Bot inicializado correctamente")
 
     async def setup_webhook(self):
-        """Configura el webhook con reintentos"""
+        """Configura el webhook"""
         if not self.initialized:
             self.initialize()
             
         webhook_url = f"https://{Config.RENDER_DOMAIN}/webhook"
-        
-        for attempt in range(3):  # 3 intentos
-            try:
-                await self.application.initialize()
-                await self.application.start()
-                await self.application.bot.set_webhook(
-                    url=webhook_url,
-                    secret_token=Config.WEBHOOK_SECRET,
-                    drop_pending_updates=True,
-                    allowed_updates=["message", "callback_query"]
-                )
-                logger.info(f"Webhook configurado en: {webhook_url}")
-                return True
-            except Exception as e:
-                logger.error(f"Intento {attempt + 1} fallido: {str(e)}")
-                await asyncio.sleep(2)
-        
-        logger.error("No se pudo configurar el webhook después de 3 intentos")
-        return False
+        await self.application.initialize()
+        await self.application.start()
+        await self.application.bot.set_webhook(
+            url=webhook_url,
+            secret_token=Config.WEBHOOK_SECRET,
+            drop_pending_updates=True,
+            allowed_updates=["message", "callback_query"]
+        )
+        logger.info(f"Webhook configurado en: {webhook_url}")
 
     async def process_update(self, update_data):
-        """Procesa una actualización con manejo robusto de errores"""
+        """Procesa una actualización con manejo de errores mejorado"""
         try:
             if not self.initialized:
                 self.initialize()
                 await self.application.initialize()
                 await self.application.start()
-            
-            # Validación y normalización de datos
-            if 'message' in update_data:
-                msg = update_data['message']
-                if 'from' in msg and 'is_bot' not in msg['from']:
-                    msg['from']['is_bot'] = False
                 
-                if 'chat' not in msg and 'from' in msg:
-                    msg['chat'] = msg['from']
+            # Verifica y completa los datos del usuario si es necesario
+            if 'message' in update_data and 'from' in update_data['message']:
+                if 'is_bot' not in update_data['message']['from']:
+                    update_data['message']['from']['is_bot'] = False
             
             update = Update.de_json(update_data, self.application.bot)
             
             if update is None:
-                logger.error("Update inválido recibido")
+                logger.error("No se pudo crear el objeto Update")
                 return False
                 
-            # Registrar interacción en la base de datos
-            if update.message:
-                self.record_interaction(
-                    user_id=update.message.from_user.id,
-                    command=update.message.text or "N/A"
-                )
-            
             await self.application.process_update(update)
             return True
             
         except Exception as e:
-            logger.error(f"Error procesando update: {str(e)}")
-            logger.error(f"Datos del update: {update_data}")
+            logger.error(f"Error procesando update: {str(e)}", exc_info=True)
+            logger.error(f"Datos del update recibido: {update_data}")
             return False
-
-    def record_interaction(self, user_id, command):
-        """Registra interacciones en la base de datos (ejecutado en thread separado)"""
-        try:
-            interaction = UserInteraction(
-                user_id=user_id,
-                command=command[:50],  # Limitar longitud
-                timestamp=datetime.now()
-            )
-            db.session.add(interaction)
-            db.session.commit()
-        except Exception as e:
-            logger.error(f"Error registrando interacción: {str(e)}")
 
 # Instancia global del bot
 bot_manager = BotManager()
 
 @app.route('/')
 def home():
-    return "¡Bot activo! Endpoints: /webhook, /webhook_status, /stats"
+    return "¡Bot activo! Webhook configurado en /webhook"
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Endpoint para actualizaciones de Telegram con rate limiting básico"""
+    """Endpoint para actualizaciones de Telegram"""
     if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != Config.WEBHOOK_SECRET:
         logger.warning("Intento de acceso no autorizado al webhook")
         return "Unauthorized", 401
     
     try:
         update_data = request.get_json()
-        logger.debug(f"Update recibido: {update_data}")
+        logger.info(f"Update recibido: {update_data}")  # Log para diagnóstico
         
-        # Añadir a la cola para procesamiento asíncrono
+        # Añadir a la cola para procesamiento
         update_queue.put(update_data)
         return "ok", 200
         
     except Exception as e:
         logger.error(f"Error en webhook: {str(e)}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
-
+        return "server error", 500
+    
 @app.route('/webhook_status', methods=['GET'])
 async def webhook_status():
-    """Endpoint para verificar el estado del webhook"""
-    try:
-        info = await bot_manager.application.bot.get_webhook_info()
-        return jsonify({
-            'url': info.url,
-            'pending_updates': info.pending_update_count,
-            'last_error_date': info.last_error_date,
-            'last_error_message': info.last_error_message,
-            'active': True if info.url else False
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    info = await bot_manager.application.bot.get_webhook_info()
+    return jsonify({
+        'url': info.url,
+        'pending_updates': info.pending_update_count,
+        'last_error': info.last_error_message
+    })
 
-@app.route('/stats', methods=['GET'])
-def get_stats():
-    """Endpoint para obtener estadísticas básicas"""
-    try:
-        user_count = db.session.query(UserInteraction.user_id).distinct().count()
-        popular_commands = db.session.query(
-            UserInteraction.command,
-            db.func.count(UserInteraction.command)
-        ).group_by(UserInteraction.command).order_by(db.func.count(UserInteraction.command).desc()).limit(5).all()
-        
-        return jsonify({
-            "total_users": user_count,
-            "popular_commands": [{"command": cmd, "count": cnt} for cmd, cnt in popular_commands]
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 async def process_updates():
-    """Procesa updates de la cola de manera asíncrona"""
+    """Procesa updates de la cola"""
     while True:
         try:
             update_data = update_queue.get()
@@ -222,9 +148,6 @@ def run_bot():
 
 def run_flask():
     """Inicia el servidor web"""
-    with app.app_context():
-        db.create_all()  # Crear tablas si no existen
-    
     logger.info(f"Iniciando servidor en puerto {PORT}")
     serve(app, host='0.0.0.0', port=PORT)
 
