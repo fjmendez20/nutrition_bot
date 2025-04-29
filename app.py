@@ -111,6 +111,16 @@ def webhook():
     except Exception as e:
         logger.error(f"Error en webhook: {str(e)}", exc_info=True)
         return "server error", 500
+    
+@app.route('/webhook_status', methods=['GET'])
+async def webhook_status():
+    info = await bot_manager.application.bot.get_webhook_info()
+    return jsonify({
+        'url': info.url,
+        'pending_updates': info.pending_update_count,
+        'last_error': info.last_error_message
+    })
+
 
 async def process_updates():
     """Procesa updates de la cola"""
