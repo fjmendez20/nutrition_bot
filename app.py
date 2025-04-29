@@ -9,7 +9,7 @@ from threading import Thread
 from waitress import serve
 from asyncio import AbstractEventLoop
 
-# Configuración de logging
+# Configuración básica
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -49,7 +49,6 @@ def webhook():
         json_data = request.get_json()
         update = Update.de_json(json_data, application.bot)
         
-        # Procesamos el update en el event loop del bot
         asyncio.run_coroutine_threadsafe(
             application.process_update(update),
             bot_event_loop
@@ -88,7 +87,6 @@ async def setup_webhook():
         allowed_updates=["message", "callback_query"]
     )
     logger.info(f"Webhook configurado en: {webhook_url}")
-    logger.info(f"Webhook info: {await application.bot.get_webhook_info()}")
 
 def run_flask():
     """Inicia Flask con Waitress"""
