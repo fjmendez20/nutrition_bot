@@ -27,15 +27,21 @@ class BotManager:
                 ApplicationBuilder()
                 .token(Config.TELEGRAM_TOKEN)
                 .arbitrary_callback_data(True)
+                .post_init(self.post_init)  # Añade esta línea
                 .build()
             )
-            
             from handlers import setup_handlers
             setup_handlers(self.application)
             
             await self.application.initialize()
             await self.application.start()
             logger.info("Bot inicializado correctamente")
+
+    async def post_init(self, application):
+        """Callback después de la inicialización"""
+        logger.info("Verificando handlers registrados:")
+        for handler in application.handlers[0]:
+            logger.info(f"Handler: {type(handler).__name__}, pattern: {getattr(handler, 'pattern', 'N/A')}")
 
     async def setup_webhook(self):
         await self.initialize()

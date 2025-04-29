@@ -160,35 +160,32 @@ async def main_menu(update: Update, context: CallbackContext):
             )
 
 def setup_handlers(application):
-    """Configuración mejorada de handlers con verificación"""
-    try:
-        # Comandos principales
-        application.add_handler(CommandHandler('start', start))
-        
-        # Handlers de menú
-        application.add_handler(CallbackQueryHandler(handle_water_reminder, pattern='^water_reminder$'))
-        application.add_handler(CallbackQueryHandler(handle_nutrition_plan_selection, pattern='^nutrition_plans$'))
-        application.add_handler(CallbackQueryHandler(handle_premium_payment, pattern='^premium$'))
-        application.add_handler(CallbackQueryHandler(main_menu, pattern='^main_menu$'))
-        
-        # Handlers de agua
-        application.add_handler(CallbackQueryHandler(handle_water_amount, pattern='^water_amount_'))
-        application.add_handler(CallbackQueryHandler(handle_water_progress, pattern='^water_progress'))
-        application.add_handler(CallbackQueryHandler(cancel_water_reminders, pattern='^cancel_water_reminders$'))
-        
-        # Handlers de planes nutricionales
-        application.add_handler(CallbackQueryHandler(send_random_plan, pattern='^plan_'))
-        
-        # Handler de mensajes de texto
-        application.add_handler(MessageHandler(
-            filters.TEXT & ~filters.COMMAND & ~filters.Regex(r'^\/'),
-            handle_weight_input
-        ))
-        
-        # Manejador de errores global
-        application.add_error_handler(error_handler)
-        
-        logger.info("Todos los handlers configurados correctamente")
-    except Exception as e:
-        logger.critical(f"Error al configurar handlers: {e}\n{traceback.format_exc()}")
-        raise
+    """Configuración mejorada con logging de diagnóstico"""
+    # Comandos
+    application.add_handler(CommandHandler('start', start))
+    
+    # Handlers principales (asegúrate que los patrones coincidan con tus keyboards)
+    main_handlers = [
+        (CallbackQueryHandler(handle_water_reminder, pattern='^water_reminder$'), "Recordatorio de agua"),
+        (CallbackQueryHandler(handle_nutrition_plan_selection, pattern='^nutrition_plans$'), "Planes nutricionales"),
+        (CallbackQueryHandler(handle_premium_payment, pattern='^premium$'), "Opciones premium"),
+        (CallbackQueryHandler(main_menu, pattern='^main_menu$'), "Menú principal"),
+        (CallbackQueryHandler(handle_water_amount, pattern='^water_amount_'), "Cantidad de agua"),
+        (CallbackQueryHandler(handle_water_progress, pattern='^water_progress'), "Progreso de agua"),
+        (CallbackQueryHandler(cancel_water_reminders, pattern='^cancel_water_reminders$'), "Cancelar recordatorios"),
+        (CallbackQueryHandler(send_random_plan, pattern='^plan_'), "Plan específico")
+    ]
+    
+    for handler, description in main_handlers:
+        application.add_handler(handler)
+        logger.info(f"Handler registrado: {description} - Patrón: {handler.pattern}")
+    
+    # Mensajes de texto
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & ~filters.Regex(r'^\/'),
+        handle_weight_input
+    ))
+    
+    # Error handler
+    application.add_error_handler(error_handler)
+    logger.info("Todos los handlers configurados correctamente")
