@@ -3,10 +3,10 @@ from telegram import Update
 from config import Config
 import logging
 import os
-from flask import Flask, request, jsonify
-import asyncio
-from threading import Thread
+from flask import Flask, request
 from waitress import serve
+import asyncio
+import threading
 import queue
 
 # Configuración de logging
@@ -24,6 +24,11 @@ update_queue = queue.Queue()
 
 class BotManager:
     def __init__(self):
+        self.initialized = False
+        self.application = None
+        
+    def initialize(self):
+        """Inicializa el bot de manera segura"""
         self.application = (
             ApplicationBuilder()
             .token(Config.TELEGRAM_TOKEN)
@@ -34,20 +39,34 @@ class BotManager:
         # Configurar handlers
         from handlers import setup_handlers
         setup_handlers(self.application)
+        
+        self.initialized = True
+        logger.info("Bot inicializado correctamente")
 
     async def setup_webhook(self):
+        """Configura el webhook"""
+        if not self.initialized:
+            self.initialize()
+            
         webhook_url = f"https://{Config.RENDER_DOMAIN}/webhook"
+        await self.application.initialize()
+        await self.application.start()
         await self.application.bot.set_webhook(
             url=webhook_url,
             secret_token=Config.WEBHOOK_SECRET,
             drop_pending_updates=True,
             allowed_updates=["message", "callback_query"]
         )
-        logger.info(f"Webhook configurado correctamente en {webhook_url}")
+        logger.info(f"Webhook configurado en: {webhook_url}")
 
     async def process_update(self, update_data):
-        """Procesa una actualización de manera asíncrona"""
+        """Procesa una actualización"""
         try:
+            if not self.initialized:
+                self.initialize()
+                await self.application.initialize()
+                await self.application.start()
+                
             update = Update.de_json(update_data, self.application.bot)
             await self.application.process_update(update)
             return True
@@ -55,7 +74,7 @@ class BotManager:
             logger.error(f"Error procesando update: {str(e)}", exc_info=True)
             return False
 
-# Inicialización del bot
+# Instancia global del bot
 bot_manager = BotManager()
 
 @app.route('/')
@@ -70,33 +89,32 @@ def webhook():
         return "Unauthorized", 401
     
     try:
-        # Añadir el update a la cola para procesamiento
         update_queue.put(request.get_json())
         return "ok", 200
     except Exception as e:
         logger.error(f"Error en webhook: {str(e)}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+        return "server error", 500
 
-async def bot_processor():
-    """Procesa updates de la cola de manera asíncrona"""
+async def process_updates():
+    """Procesa updates de la cola"""
     while True:
         try:
             update_data = update_queue.get()
             await bot_manager.process_update(update_data)
             update_queue.task_done()
         except Exception as e:
-            logger.error(f"Error en bot_processor: {str(e)}", exc_info=True)
+            logger.error(f"Error en process_updates: {str(e)}", exc_info=True)
 
 def run_bot():
-    """Inicia el bot y el procesador de updates"""
+    """Inicia el bot en un event loop separado"""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
-    # Configurar webhook
+    # Configuración inicial
     loop.run_until_complete(bot_manager.setup_webhook())
     
-    # Iniciar procesador de updates
-    loop.create_task(bot_processor())
+    # Procesador de updates
+    loop.create_task(process_updates())
     
     logger.info("Bot iniciado y listo para recibir actualizaciones")
     loop.run_forever()
@@ -107,9 +125,9 @@ def run_flask():
     serve(app, host='0.0.0.0', port=PORT)
 
 if __name__ == '__main__':
-    # Iniciar el bot en un hilo separado
-    bot_thread = Thread(target=run_bot, daemon=True)
+    # Inicia el bot en un hilo separado
+    bot_thread = threading.Thread(target=run_bot, daemon=True)
     bot_thread.start()
     
-    # Iniciar Flask en el hilo principal
+    # Inicia Flask en el hilo principal
     run_flask()
