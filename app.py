@@ -6,6 +6,7 @@ import os
 from flask import Flask, request, jsonify
 from waitress import serve
 import asyncio
+from telegram.request import HTTPXRequest
 
 # Configuración de logging
 logging.basicConfig(
@@ -20,6 +21,13 @@ PORT = int(os.environ.get('PORT', 10000))
 class BotManager:
     def __init__(self):
         self.application = None
+        self.request = HTTPXRequest(
+            connection_pool_size=20,  # Aumentamos el pool de conexiones
+            read_timeout=30,
+            write_timeout=30,
+            connect_timeout=30,
+            pool_timeout=30
+        )
         
     async def initialize(self):
         if self.application is None:
@@ -27,9 +35,11 @@ class BotManager:
                 ApplicationBuilder()
                 .token(Config.TELEGRAM_TOKEN)
                 .arbitrary_callback_data(True)
-                .post_init(self.post_init)  # Añade esta línea
+                .request(self.request)  # Usamos nuestra configuración custom
+                .post_init(self.post_init)
                 .build()
             )
+            
             from handlers import setup_handlers
             setup_handlers(self.application)
             
@@ -38,10 +48,10 @@ class BotManager:
             logger.info("Bot inicializado correctamente")
 
     async def post_init(self, application):
-        """Callback después de la inicialización"""
-        logger.info("Verificando handlers registrados:")
+        """Verificación después de inicializar"""
+        logger.info("Handlers registrados:")
         for handler in application.handlers[0]:
-            logger.info(f"Handler: {type(handler).__name__}, pattern: {getattr(handler, 'pattern', 'N/A')}")
+            logger.info(f"- {type(handler).__name__}: {getattr(handler, 'pattern', 'N/A')}")
 
     async def setup_webhook(self):
         await self.initialize()
@@ -50,7 +60,7 @@ class BotManager:
             url=webhook_url,
             secret_token=Config.WEBHOOK_SECRET,
             drop_pending_updates=True,
-            allowed_updates=["message", "callback_query"]
+            allowed_updates=["message", "callback_query", "chat_member", "my_chat_member"]
         )
         logger.info(f"Webhook configurado en: {webhook_url}")
 
@@ -60,6 +70,11 @@ class BotManager:
                 await self.initialize()
             
             update = Update.de_json(update_data, self.application.bot)
+            
+            # Log para diagnóstico
+            if update.callback_query:
+                logger.info(f"Procesando callback: {update.callback_query.data}")
+            
             await self.application.process_update(update)
             return True
         except Exception as e:
@@ -75,14 +90,17 @@ def home():
 @app.post('/webhook')
 async def webhook():
     if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != Config.WEBHOOK_SECRET:
-        logger.warning("Intento de acceso no autorizado al webhook")
         return "Unauthorized", 401
     
-    update_data = request.get_json()
-    logger.info(f"Update recibido: {update_data}")
-    
-    success = await bot_manager.process_update(update_data)
-    return "ok" if success else "error", 200
+    try:
+        update_data = request.get_json()
+        logger.info(f"Update recibido (type: {update_data.get('update_id')})")
+        
+        success = await bot_manager.process_update(update_data)
+        return "ok" if success else "error", 200
+    except Exception as e:
+        logger.error(f"Error en webhook: {str(e)}", exc_info=True)
+        return "server error", 500
 
 @app.get('/webhook_status')
 async def webhook_status():
@@ -93,7 +111,8 @@ async def webhook_status():
     return jsonify({
         'url': info.url,
         'pending_updates': info.pending_update_count,
-        'last_error': info.last_error_message
+        'last_error': info.last_error_message,
+        'last_error_date': str(info.last_error_date)
     })
 
 def run_flask():
