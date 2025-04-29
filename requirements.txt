@@ -4,7 +4,6 @@ Werkzeug==2.3.7
 waitress==2.1.2
 python-dotenv==1.0.0
 httpx~=0.24.0
-sqlalchemy==2.0.19
 python-dotenv==1.0.0
 stripe==5.5.0
 requests==2.31.0
