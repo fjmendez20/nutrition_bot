@@ -22,21 +22,13 @@ PORT = int(os.environ.get('PORT', 10000))
 class BotManager:
     def __init__(self):
         self.application = None
-        self.lock = asyncio.Lock()  # Para evitar race conditions
-        
-        # Configuración optimizada para Render
         self.request = HTTPXRequest(
-            connection_pool_size=30,
-            read_timeout=30.0,
+            connection_pool_size=30,  # Aumentado para entornos cloud
+            read_timeout=30.0,       # Timeout generoso
             write_timeout=30.0,
             connect_timeout=30.0,
-            pool_timeout=60.0,
-            http_version="1.1",
-            limits=httpx.Limits(
-                max_connections=30,
-                max_keepalive_connections=25,
-                keepalive_expiry=60.0
-            )
+            pool_timeout=60.0,       # Más tiempo para obtener conexión
+            http_version="1.1"       # Más compatible que HTTP/2
         )
     async def safe_shutdown(self):
         """Cierre seguro para Render"""
