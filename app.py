@@ -4,13 +4,16 @@ from config import Config
 import logging
 import os
 from flask import Flask, request, jsonify
-from waitress import serve
 import asyncio
 from telegram.request import HTTPXRequest
 import threading
+import time
 
-# Configuración inicial
-logging.basicConfig(level=logging.INFO)
+# Configuración básica
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -22,14 +25,23 @@ class BotManager:
         self.loop = asyncio.new_event_loop()
         self.request = HTTPXRequest(
             connection_pool_size=20,
-            read_timeout=20.0,
-            write_timeout=20.0,
-            connect_timeout=20.0,
-            pool_timeout=30.0
+            read_timeout=30.0,
+            write_timeout=30.0,
+            connect_timeout=30.0,
+            pool_timeout=60.0
         )
-    
-    def run_async(self, coro):
-        return asyncio.run_coroutine_threadsafe(coro, self.loop).result()
+        self._start_background_loop()
+
+    def _start_background_loop(self):
+        threading.Thread(
+            target=self._run_event_loop,
+            daemon=True,
+            name='BotManagerLoop'
+        ).start()
+
+    def _run_event_loop(self):
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
 
     async def _initialize(self):
         self.application = (
@@ -45,20 +57,32 @@ class BotManager:
         
         await self.application.initialize()
         await self.application.start()
+        logger.info("Bot inicializado correctamente")
 
     def initialize(self):
-        self.run_async(self._initialize())
+        future = asyncio.run_coroutine_threadsafe(
+            self._initialize(),
+            self.loop
+        )
+        future.result()  # Espera a que termine
 
     async def _setup_webhook(self):
         webhook_url = f"https://{Config.RENDER_DOMAIN}/webhook"
+        await self.application.bot.delete_webhook()
         await self.application.bot.set_webhook(
             url=webhook_url,
             secret_token=Config.WEBHOOK_SECRET,
-            allowed_updates=["message", "callback_query"]
+            allowed_updates=["message", "callback_query"],
+            max_connections=20
         )
+        logger.info(f"Webhook configurado en: {webhook_url}")
 
     def setup_webhook(self):
-        self.run_async(self._setup_webhook())
+        future = asyncio.run_coroutine_threadsafe(
+            self._setup_webhook(),
+            self.loop
+        )
+        future.result()
 
     async def _process_update(self, update_data):
         update = Update.de_json(update_data, self.application.bot)
@@ -66,42 +90,45 @@ class BotManager:
         return True
 
     def process_update(self, update_data):
-        try:
-            return self.run_async(self._process_update(update_data))
-        except Exception as e:
-            logger.error(f"Error procesando update: {e}")
-            return False
+        future = asyncio.run_coroutine_threadsafe(
+            self._process_update(update_data),
+            self.loop
+        )
+        return future.result()
 
-# Inicialización
+# Inicialización del bot
 bot_manager = BotManager()
 bot_manager.initialize()
 bot_manager.setup_webhook()
 
-# Endpoints Flask (síncronos)
+# Endpoints Flask
+@app.route('/')
+def home():
+    return "¡Bot activo! Webhook configurado en /webhook"
+
 @app.post('/webhook')
 def webhook():
     if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != Config.WEBHOOK_SECRET:
         return "Unauthorized", 401
     
-    update_data = request.get_json()
-    success = bot_manager.process_update(update_data)
-    return ("ok", 200) if success else ("error", 500)
+    try:
+        update_data = request.get_json()
+        logger.info(f"Update recibido (type: {update_data.get('update_id')})")
+        success = bot_manager.process_update(update_data)
+        return "ok" if success else "error", 200
+    except Exception as e:
+        logger.error(f"Error en webhook: {str(e)}", exc_info=True)
+        return "server error", 500
 
-def run():
-    serve(app, host='0.0.0.0', port=PORT)
+@app.get('/health')
+def health_check():
+    return jsonify({"status": "healthy"}), 200
+
+# Inicio del servidor
+def run_server():
+    from waitress import serve
+    logger.info(f"Iniciando servidor en puerto {PORT}")
+    serve(app, host='0.0.0.0', port=PORT, threads=4)
 
 if __name__ == '__main__':
-    # Configura el bot
-    bot_manager.initialize()
-    bot_manager.setup_webhook()
-    
-    # Inicia el servidor directamente
-    import waitress
-    waitress.serve(
-        app,
-        host='0.0.0.0',
-        port=PORT,
-        threads=4,
-        ident=None
-    )
-    logger.info(f"Servidor iniciado en puerto {PORT}")
+    run_server()
