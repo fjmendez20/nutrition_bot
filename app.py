@@ -7,6 +7,7 @@ from flask import Flask, request, jsonify
 from waitress import serve
 import asyncio
 from telegram.request import HTTPXRequest
+import httpx
 
 # Configuración de logging
 logging.basicConfig(
