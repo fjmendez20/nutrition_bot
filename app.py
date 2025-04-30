@@ -90,5 +90,23 @@ def webhook():
 def run():
     serve(app, host='0.0.0.0', port=PORT)
 
+def run_server():
+    from waitress import serve
+    logger.info(f"Iniciando servidor en 0.0.0.0:{PORT}")
+    serve(app, host='0.0.0.0', port=PORT, threads=4)
+
 if __name__ == '__main__':
-    run()
+    # Inicia el bot y el servidor
+    bot_manager.initialize()
+    bot_manager.setup_webhook()
+    
+    # Inicia Flask en un hilo separado
+    flask_thread = threading.Thread(target=run_server, daemon=True)
+    flask_thread.start()
+    
+    # Mantén el programa corriendo
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logger.info("Deteniendo servidor...")
