@@ -43,7 +43,7 @@ class BotManager:
             self.application = (
                 ApplicationBuilder()
                 .token(Config.TELEGRAM_TOKEN)
-                .arbitrary_callback_data(True)
+                #.arbitrary_callback_data(True)
                 .request(self.request)
                 .post_init(self.post_init)
                 .build()
