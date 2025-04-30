@@ -3,8 +3,8 @@ Flask[async]==2.2.5
 Werkzeug==2.3.7
 waitress==2.1.2
 python-dotenv==1.0.0
-httpx==0.25.0  # Versión más reciente con mejor manejo de conexiones
-httpcore==0.17.3  # Versión compatible con httpx 0.25.0
+httpx~=0.24.0  
+httpcore==0.17.3
 stripe==5.5.0
 requests==2.31.0
 Flask-SQLAlchemy==3.1.1
