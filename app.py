@@ -23,13 +23,14 @@ class BotManager:
     def __init__(self):
         self.application = None
         self.request = HTTPXRequest(
-            connection_pool_size=30,  # Aumentado para entornos cloud
-            read_timeout=30.0,       # Timeout generoso
+            connection_pool_size=30,
+            read_timeout=30.0,
             write_timeout=30.0,
             connect_timeout=30.0,
-            pool_timeout=60.0,       # Más tiempo para obtener conexión
-            http_version="1.1"       # Más compatible que HTTP/2
+            pool_timeout=60.0,
+            http_version="1.1"
         )
+    
     async def safe_shutdown(self):
         """Cierre seguro para Render"""
         if self.application:
@@ -43,7 +44,7 @@ class BotManager:
                 ApplicationBuilder()
                 .token(Config.TELEGRAM_TOKEN)
                 .arbitrary_callback_data(True)
-                .request(self.request)  # Usamos nuestra configuración custom
+                .request(self.request)
                 .post_init(self.post_init)
                 .build()
             )
@@ -61,40 +62,42 @@ class BotManager:
         for handler in application.handlers[0]:
             logger.info(f"- {type(handler).__name__}: {getattr(handler, 'pattern', 'N/A')}")
 
-async def setup_webhook(self):
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            await self.initialize()
-            webhook_url = f"https://{Config.RENDER_DOMAIN}/webhook"
-            
-            await self.application.bot.delete_webhook(drop_pending_updates=True)
-            await asyncio.sleep(1)
-            
-            await self.application.bot.set_webhook(
-                url=webhook_url,
-                secret_token=Config.WEBHOOK_SECRET,
-                drop_pending_updates=True,
-                allowed_updates=Update.ALL_TYPES,
-                max_connections=30
-            )
-            logger.info(f"Webhook configurado (intento {attempt + 1}): {webhook_url}")
-            return
-        except Exception as e:
-            if attempt == max_retries - 1:
-                raise
-            wait_time = (attempt + 1) * 5
-            logger.warning(f"Intento {attempt + 1} fallido. Esperando {wait_time}s: {e}")
-            await asyncio.sleep(wait_time)
+    async def setup_webhook(self):
+        """Configura el webhook con reintentos automáticos"""
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                await self.initialize()
+                webhook_url = f"https://{Config.RENDER_DOMAIN}/webhook"
+                
+                await self.application.bot.delete_webhook(drop_pending_updates=True)
+                await asyncio.sleep(1)
+                
+                await self.application.bot.set_webhook(
+                    url=webhook_url,
+                    secret_token=Config.WEBHOOK_SECRET,
+                    drop_pending_updates=True,
+                    allowed_updates=Update.ALL_TYPES,
+                    max_connections=30
+                )
+                logger.info(f"Webhook configurado (intento {attempt + 1}): {webhook_url}")
+                return True
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    logger.error(f"Fallo al configurar webhook después de {max_retries} intentos")
+                    raise
+                wait_time = (attempt + 1) * 5
+                logger.warning(f"Intento {attempt + 1} fallido. Esperando {wait_time}s: {e}")
+                await asyncio.sleep(wait_time)
 
     async def process_update(self, update_data):
+        """Procesa un update de Telegram"""
         try:
             if self.application is None:
                 await self.initialize()
             
             update = Update.de_json(update_data, self.application.bot)
             
-            # Log para diagnóstico
             if update.callback_query:
                 logger.info(f"Procesando callback: {update.callback_query.data}")
             
@@ -137,16 +140,15 @@ async def webhook_status():
         'last_error': info.last_error_message,
         'last_error_date': str(info.last_error_date)
     })
-    
+
 @app.get('/health')
 async def health_check():
     try:
         if bot_manager.application:
-            # Verifica conexión con Telegram
             await bot_manager.application.bot.get_me()
             return jsonify({
                 "status": "healthy",
-                "pool_connections": bot_manager.request._client._transport._pool._connections
+                "pool_connections": len(bot_manager.request._client._transport._pool._connections)
             }), 200
         return jsonify({"status": "initializing"}), 200
     except Exception as e:
