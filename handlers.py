@@ -22,6 +22,8 @@ from premium import handle_premium_payment
 from datetime import datetime
 import random
 import traceback
+import asyncio
+
 
 # Configuración avanzada de logging
 logging.basicConfig(
@@ -112,14 +114,27 @@ async def start(update: Update, context: CallbackContext):
             )
 
 async def error_handler(update: Update, context: CallbackContext):
-    """Manejador mejorado de errores globales"""
-    error_msg = str(context.error)
-    logger.error(f"Error global: {error_msg}\n{traceback.format_exc()}")
-    
-    if update.effective_message:
+    """Manejador mejorado de errores globales con reintentos"""
+    error = context.error
+    logger.error(f"Error global: {error}\n{traceback.format_exc()}")
+
+    if isinstance(error, telegram.error.TimedOut):
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                await asyncio.sleep(1 + attempt)  # Backoff exponencial
+                await update.effective_message.reply_text(
+                    f"⚠️ Timeout (intento {attempt + 1}). Reintentando..."
+                )
+                return
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    await update.effective_message.reply_text(
+                        "🔴 Servicio ocupado. Por favor, inténtalo más tarde."
+                    )
+    else:
         await update.effective_message.reply_text(
-            "⚠️ Lo siento, ocurrió un error inesperado. El equipo ha sido notificado. "
-            "Por favor, intenta nuevamente más tarde."
+            "⚠️ Error inesperado. Nuestro equipo ha sido notificado."
         )
 
 async def main_menu(update: Update, context: CallbackContext):
