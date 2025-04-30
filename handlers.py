@@ -1,4 +1,4 @@
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 import logging
 from database import get_db_session, User
@@ -23,6 +23,7 @@ from datetime import datetime
 import random
 import traceback
 import asyncio
+import telegram
 
 
 # Configuración avanzada de logging
@@ -114,9 +115,20 @@ async def start(update: Update, context: CallbackContext):
             )
 
 async def error_handler(update: Update, context: CallbackContext):
-    """Manejador mejorado de errores globales con reintentos"""
+    """Manejador mejorado de errores globales"""
     error = context.error
     logger.error(f"Error global: {error}\n{traceback.format_exc()}")
+    
+    if update.callback_query:
+        try:
+            await update.callback_query.answer("⚠️ Error al procesar tu acción")
+        except:
+            pass
+    
+    if update.effective_message:
+        await update.effective_message.reply_text(
+            "⚠️ Error procesando tu solicitud. Intenta nuevamente."
+        )
 
     if isinstance(error, telegram.error.TimedOut):
         max_retries = 3
