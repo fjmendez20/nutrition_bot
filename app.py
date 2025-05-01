@@ -25,13 +25,14 @@ class BotManager:
         self.application = None
         self.loop = asyncio.new_event_loop()
         self.request = HTTPXRequest(
-            connection_pool_size=10,  # Reducido para free tier
+            connection_pool_size=10,
             read_timeout=20.0,
             write_timeout=20.0,
             connect_timeout=20.0,
             pool_timeout=30.0
         )
-        self._init_lock = threading.Lock()
+        self._init_lock = threading.Lock()  # Lock síncrono para operaciones entre threads
+        self._async_init_lock = asyncio.Lock(loop=self.loop)  # Lock asíncrono para operaciones async
         self._start_background_loop()
         self.initialize()
 
@@ -47,28 +48,36 @@ class BotManager:
         ).start()
 
     async def _initialize(self):
-        async with self._init_lock:
+        # Usamos el lock síncrono para protección entre threads
+        with self._init_lock:
             if self.application is None:
-                self.application = (
-                    ApplicationBuilder()
-                    .token(Config.TELEGRAM_TOKEN)
-                    .arbitrary_callback_data(False)
-                    .request(self.request)
-                    .build()
-                )
-                
-                from handlers import setup_handlers
-                setup_handlers(self.application)
-                
-                await self.application.initialize()
-                await self.application.start()
-                logger.info("Bot inicializado correctamente")
+                # Dentro de las operaciones async usamos el lock asíncrono
+                async with self._async_init_lock:
+                    self.application = (
+                        ApplicationBuilder()
+                        .token(Config.TELEGRAM_TOKEN)
+                        .arbitrary_callback_data(False)
+                        .request(self.request)
+                        .build()
+                    )
+                    
+                    from handlers import setup_handlers
+                    setup_handlers(self.application)
+                    
+                    await self.application.initialize()
+                    await self.application.start()
+                    logger.info("Bot inicializado correctamente")
 
     def initialize(self):
-        asyncio.run_coroutine_threadsafe(
+        future = asyncio.run_coroutine_threadsafe(
             self._initialize(),
             self.loop
-        ).result(timeout=30)  # Timeout para evitar bloqueos eternos
+        )
+        try:
+            future.result(timeout=30)
+        except Exception as e:
+            logger.error(f"Error inicializando el bot: {str(e)}")
+            raise
 
     async def _setup_webhook(self):
         webhook_url = f"https://{Config.RENDER_DOMAIN}/webhook"
@@ -86,7 +95,11 @@ class BotManager:
             self._setup_webhook(),
             self.loop
         )
-        future.result(timeout=30)
+        try:
+            future.result(timeout=30)
+        except Exception as e:
+            logger.error(f"Error configurando webhook: {str(e)}")
+            raise
 
     async def _process_update(self, update_data):
         update = Update.de_json(update_data, self.application.bot)
@@ -98,26 +111,33 @@ class BotManager:
             self._process_update(update_data),
             self.loop
         )
-        return future.result(timeout=30)
+        try:
+            return future.result(timeout=30)
+        except Exception as e:
+            logger.error(f"Error procesando update: {str(e)}")
+            return False
 
 def keep_alive():
     """Función para mantener activa la instancia con pings periódicos"""
     while True:
         try:
-            # Verifica si el dominio está configurado
             if hasattr(Config, 'RENDER_DOMAIN') and Config.RENDER_DOMAIN:
                 url = f'https://{Config.RENDER_DOMAIN}/health'
                 response = requests.get(url, timeout=10)
-                logger.info(f"Keep-alive ping realizado. Status: {response.status_code}")
+                logger.info(f"Keep-alive ping. Status: {response.status_code}")
             else:
-                logger.warning("RENDER_DOMAIN no configurado, no se puede hacer ping")
+                logger.warning("RENDER_DOMAIN no configurado")
         except Exception as e:
             logger.error(f"Error en keep-alive: {str(e)}")
-        time.sleep(240)  # Ping cada 4 minutos (Render mantiene activo ~5 min sin tráfico)
+        time.sleep(240)
 
 # Inicialización del bot
-bot_manager = BotManager()
-bot_manager.setup_webhook()
+try:
+    bot_manager = BotManager()
+    bot_manager.setup_webhook()
+except Exception as e:
+    logger.critical(f"Fallo al iniciar el bot: {str(e)}")
+    raise
 
 # Endpoints Flask
 @app.route('/')
@@ -144,7 +164,7 @@ def health_check():
     """Endpoint para verificaciones de salud y keep-alive"""
     return jsonify({
         "status": "healthy",
-        "bot": "running",
+        "bot": "running" if bot_manager.application else "starting",
         "timestamp": time.time()
     }), 200
 
