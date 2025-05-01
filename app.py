@@ -1,10 +1,19 @@
+import sys
+import asyncio
+
+if sys.version_info >= (3, 11) and not hasattr(asyncio, 'coroutine'):
+    def coroutine(f):
+        return f
+    asyncio.coroutine = coroutine
+
+from telegram.ext import ApplicationBuilder
+from telegram import Update
 from telegram.ext import ApplicationBuilder
 from telegram import Update
 from config import Config
 import logging
 import os
 from flask import Flask, request, jsonify
-import asyncio
 from telegram.request import HTTPXRequest
 import threading
 import time

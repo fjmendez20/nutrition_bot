@@ -9,16 +9,7 @@ from datetime import datetime
 from mega import Mega
 import tempfile
 import logging
-import sys
-import asyncio
 
-if sys.version_info >= (3, 11):
-    import inspect
-    if not hasattr(asyncio, 'coroutine'):
-        def coroutine(f):
-            return f
-        asyncio.coroutine = coroutine
-        
 # Configuración de MEGA
 MEGA_EMAIL = 'MEGA_EMAIL'  # Cambiar por tu email de MEGA
 MEGA_PASSWORD = 'MEGA_PASSWORD'      # Cambiar por tu contraseña de MEGA
