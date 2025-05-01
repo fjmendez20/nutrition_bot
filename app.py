@@ -8,8 +8,9 @@ import asyncio
 from telegram.request import HTTPXRequest
 import threading
 import time
+import requests
 
-# Configuración básica
+# Configuración básica de logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -24,47 +25,50 @@ class BotManager:
         self.application = None
         self.loop = asyncio.new_event_loop()
         self.request = HTTPXRequest(
-            connection_pool_size=20,
-            read_timeout=30.0,
-            write_timeout=30.0,
-            connect_timeout=30.0,
-            pool_timeout=60.0
+            connection_pool_size=10,  # Reducido para free tier
+            read_timeout=20.0,
+            write_timeout=20.0,
+            connect_timeout=20.0,
+            pool_timeout=30.0
         )
+        self._init_lock = threading.Lock()
         self._start_background_loop()
+        self.initialize()
 
     def _start_background_loop(self):
+        def run_loop():
+            asyncio.set_event_loop(self.loop)
+            self.loop.run_forever()
+            
         threading.Thread(
-            target=self._run_event_loop,
+            target=run_loop,
             daemon=True,
             name='BotManagerLoop'
         ).start()
 
-    def _run_event_loop(self):
-        asyncio.set_event_loop(self.loop)
-        self.loop.run_forever()
-
     async def _initialize(self):
-        self.application = (
-            ApplicationBuilder()
-            .token(Config.TELEGRAM_TOKEN)
-            .arbitrary_callback_data(False)
-            .request(self.request)
-            .build()
-        )
-        
-        from handlers import setup_handlers
-        setup_handlers(self.application)
-        
-        await self.application.initialize()
-        await self.application.start()
-        logger.info("Bot inicializado correctamente")
+        async with self._init_lock:
+            if self.application is None:
+                self.application = (
+                    ApplicationBuilder()
+                    .token(Config.TELEGRAM_TOKEN)
+                    .arbitrary_callback_data(False)
+                    .request(self.request)
+                    .build()
+                )
+                
+                from handlers import setup_handlers
+                setup_handlers(self.application)
+                
+                await self.application.initialize()
+                await self.application.start()
+                logger.info("Bot inicializado correctamente")
 
     def initialize(self):
-        future = asyncio.run_coroutine_threadsafe(
+        asyncio.run_coroutine_threadsafe(
             self._initialize(),
             self.loop
-        )
-        future.result()  # Espera a que termine
+        ).result(timeout=30)  # Timeout para evitar bloqueos eternos
 
     async def _setup_webhook(self):
         webhook_url = f"https://{Config.RENDER_DOMAIN}/webhook"
@@ -82,7 +86,7 @@ class BotManager:
             self._setup_webhook(),
             self.loop
         )
-        future.result()
+        future.result(timeout=30)
 
     async def _process_update(self, update_data):
         update = Update.de_json(update_data, self.application.bot)
@@ -94,11 +98,25 @@ class BotManager:
             self._process_update(update_data),
             self.loop
         )
-        return future.result()
+        return future.result(timeout=30)
+
+def keep_alive():
+    """Función para mantener activa la instancia con pings periódicos"""
+    while True:
+        try:
+            # Verifica si el dominio está configurado
+            if hasattr(Config, 'RENDER_DOMAIN') and Config.RENDER_DOMAIN:
+                url = f'https://{Config.RENDER_DOMAIN}/health'
+                response = requests.get(url, timeout=10)
+                logger.info(f"Keep-alive ping realizado. Status: {response.status_code}")
+            else:
+                logger.warning("RENDER_DOMAIN no configurado, no se puede hacer ping")
+        except Exception as e:
+            logger.error(f"Error en keep-alive: {str(e)}")
+        time.sleep(240)  # Ping cada 4 minutos (Render mantiene activo ~5 min sin tráfico)
 
 # Inicialización del bot
 bot_manager = BotManager()
-bot_manager.initialize()
 bot_manager.setup_webhook()
 
 # Endpoints Flask
@@ -109,6 +127,7 @@ def home():
 @app.post('/webhook')
 def webhook():
     if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != Config.WEBHOOK_SECRET:
+        logger.warning("Intento de acceso no autorizado al webhook")
         return "Unauthorized", 401
     
     try:
@@ -122,13 +141,26 @@ def webhook():
 
 @app.get('/health')
 def health_check():
-    return jsonify({"status": "healthy"}), 200
+    """Endpoint para verificaciones de salud y keep-alive"""
+    return jsonify({
+        "status": "healthy",
+        "bot": "running",
+        "timestamp": time.time()
+    }), 200
 
-# Inicio del servidor
 def run_server():
+    """Inicia el servidor web"""
     from waitress import serve
     logger.info(f"Iniciando servidor en puerto {PORT}")
     serve(app, host='0.0.0.0', port=PORT, threads=4)
 
 if __name__ == '__main__':
+    # Inicia el thread de keep-alive
+    threading.Thread(
+        target=keep_alive,
+        daemon=True,
+        name='KeepAliveThread'
+    ).start()
+    
+    # Inicia el servidor
     run_server()
