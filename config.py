@@ -18,12 +18,6 @@ class Config:
     STRIPE_API_KEY = os.getenv('STRIPE_API_KEY', '')
     PAYPAL_CLIENT_ID = os.getenv('PAYPAL_CLIENT_ID', '')
     
-    # Google Drive (para los PDFs)
-    GOOGLE_DRIVE_FOLDER_IDS = {
-        'weight_loss': '18cYQJs4vGg1MxFSIMCsjL3mA-oRT-enR',
-        'weight_gain': '1IGzHUejlRecVUPoumJG1yzcI5lwtul7q',
-        'maintenance': '19qBf8nY5uEjq9pvPaXlCe4VwobdfZVo4',
-        'sports': '1YXE-1d88E-AhBEPMcaGKft1jL81paLLD',
-        'metabolic': '1xx3HONuEvSj4R7OsJMj8V3r5f-KET74B',
-        'aesthetic': '1kpk9XN7n5vThzJ2ALchYIvRciE3WzwMu'
-    }
+    # Mega (para los PDFs)    
+    MEGA_EMAIL = os.getenv('MEGA_EMAIL', 'MEGA_EMAIL')
+    MEGA_PASSWORD = os.getenv('MEGA_PASSWORD', 'MEGA_PASSWORD')
