@@ -8,4 +8,5 @@ httpcore==0.17.3
 stripe==5.5.0
 requests==2.31.0
 Flask-SQLAlchemy==3.1.1
-mega.py>=1.1.0
+mega.py==1.0.8  
+tenacity==8.2.2  
