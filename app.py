@@ -31,14 +31,16 @@ class BotManager:
             connect_timeout=20.0,
             pool_timeout=30.0
         )
-        self._init_lock = threading.Lock()  # Lock síncrono para operaciones entre threads
-        self._async_init_lock = asyncio.Lock(loop=self.loop)  # Lock asíncrono para operaciones async
+        self._init_lock = threading.Lock()
+        self._async_init_lock = None  # Se inicializará en el event loop
         self._start_background_loop()
         self.initialize()
 
     def _start_background_loop(self):
         def run_loop():
             asyncio.set_event_loop(self.loop)
+            # Inicializamos el lock asíncrono dentro del event loop
+            self.loop.run_until_complete(self._init_async_lock())
             self.loop.run_forever()
             
         threading.Thread(
@@ -47,11 +49,17 @@ class BotManager:
             name='BotManagerLoop'
         ).start()
 
+    async def _init_async_lock(self):
+        """Inicializa el lock asíncrono dentro del event loop"""
+        self._async_init_lock = asyncio.Lock()
+
     async def _initialize(self):
         # Usamos el lock síncrono para protección entre threads
         with self._init_lock:
             if self.application is None:
-                # Dentro de las operaciones async usamos el lock asíncrono
+                if self._async_init_lock is None:
+                    await asyncio.sleep(0.1)  # Espera breve si el lock no está listo
+                
                 async with self._async_init_lock:
                     self.application = (
                         ApplicationBuilder()
