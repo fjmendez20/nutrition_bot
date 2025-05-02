@@ -57,67 +57,57 @@ async def get_random_plan_file(plan_type):
         
         folder_name = PLAN_FOLDERS.get(plan_type)
         if not folder_name:
-            error_msg = f"Tipo de plan no reconocido: {plan_type}"
-            logging.error(error_msg)
+            logging.error(f"Tipo de plan no reconocido: {plan_type}")
             return None
         
-        # Buscar carpetas en MEGA (nuevo formato)
-        root_folder = mega.find(MEGA_FOLDER)
+        # Obtener todos los archivos de MEGA
+        files = mega.get_files()
+        
+        # Buscar la carpeta principal
+        root_folder = None
+        for file_id, file_data in files.items():
+            if file_data['a']['n'] == MEGA_FOLDER and file_data['t'] == 1:  # 1 = folder
+                root_folder = file_id
+                break
+        
         if not root_folder:
-            error_msg = f"Carpeta principal '{MEGA_FOLDER}' no encontrada en MEGA"
-            logging.error(error_msg)
+            logging.error(f"Carpeta principal '{MEGA_FOLDER}' no encontrada")
             return None
         
-        logging.info(f"Buscando carpeta '{folder_name}' dentro de '{MEGA_FOLDER}'")
-        plan_folder = mega.find(folder_name, root_folder)
+        # Buscar la subcarpeta del plan
+        plan_folder = None
+        for file_id, file_data in files.items():
+            if file_data['a']['n'] == folder_name and file_data['t'] == 1 and file_data['p'] == root_folder:
+                plan_folder = file_id
+                break
+        
         if not plan_folder:
-            error_msg = f"Carpeta '{folder_name}' no encontrada en '{MEGA_FOLDER}'"
-            logging.error(error_msg)
+            logging.error(f"Carpeta '{folder_name}' no encontrada")
             return None
         
-        # Filtrar archivos PDF (nuevo formato)
-        logging.info(f"Obteniendo archivos de la carpeta '{folder_name}'")
-        files = mega.get_files_in_node(plan_folder)
-        if not files:
-            error_msg = f"No se encontraron archivos en '{folder_name}'"
-            logging.error(error_msg)
-            return None
-        
-        # Convertir el diccionario de archivos a lista
-        files_list = list(files.values())
-        pdf_files = [f for f in files_list if isinstance(f, dict) and 
-                   f.get('a', {}).get('n', '').lower().endswith('.pdf')]
+        # Filtrar archivos PDF en la subcarpeta
+        pdf_files = []
+        for file_id, file_data in files.items():
+            if file_data['p'] == plan_folder and file_data['t'] == 0:  # 0 = file
+                if file_data['a']['n'].lower().endswith('.pdf'):
+                    pdf_files.append((file_id, file_data))
         
         if not pdf_files:
-            error_msg = f"No hay PDFs en '{folder_name}' (se encontraron {len(files_list)} archivos)"
-            logging.error(error_msg)
+            logging.error(f"No hay PDFs en '{folder_name}'")
             return None
         
         # Descargar archivo temporal
-        selected_file = random.choice(pdf_files)
+        selected_file_id, selected_file_data = random.choice(pdf_files)
         temp_dir = tempfile.gettempdir()
-        file_name = selected_file['a']['n']
-        local_path = os.path.join(temp_dir, file_name)
+        local_path = os.path.join(temp_dir, selected_file_data['a']['n'])
         
-        logging.info(f"Descargando archivo: {file_name}")
-        download_url = mega.get_upload_link(selected_file)
-        if not download_url:
-            error_msg = "No se pudo obtener URL de descarga"
-            logging.error(error_msg)
-            return None
-            
-        mega.download_url(download_url, dest_path=temp_dir)
+        logging.info(f"Descargando archivo: {selected_file_data['a']['n']}")
+        mega.download((selected_file_id, selected_file_data), dest_path=temp_dir)
         
-        if not os.path.exists(local_path):
-            error_msg = f"El archivo no se descargó correctamente en {local_path}"
-            logging.error(error_msg)
-            return None
-            
         return local_path
     
     except Exception as e:
-        error_msg = f"Error al obtener archivo: {str(e)} - Tipo: {type(e).__name__}"
-        logging.error(error_msg, exc_info=True)
+        logging.error(f"Error al obtener archivo: {str(e)}", exc_info=True)
         return None
 
 async def send_random_plan(update: Update, context: CallbackContext):
