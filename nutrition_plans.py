@@ -9,7 +9,7 @@ from datetime import datetime
 from mega import Mega
 import tempfile
 import logging
-from config import config
+from config import Config
 
 
 MEGA_FOLDER = 'nutrition_plans'
@@ -33,7 +33,7 @@ def initialize_mega():
     if mega is None:
         try:
             mega = Mega()
-            mega.login(config.MEGA_EMAIL, config.MEGA_PASSWORD)
+            mega.login(Config.MEGA_EMAIL, Config.MEGA_PASSWORD)
             logging.info("Conexión con MEGA establecida")
         except Exception as e:
             logging.error(f"Error al conectar con MEGA: {str(e)}")
