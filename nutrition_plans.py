@@ -61,7 +61,7 @@ async def get_random_plan_file(plan_type):
             logging.error(error_msg)
             return None
         
-        # Buscar carpetas en MEGA
+        # Buscar carpetas en MEGA (nuevo formato)
         root_folder = mega.find(MEGA_FOLDER)
         if not root_folder:
             error_msg = f"Carpeta principal '{MEGA_FOLDER}' no encontrada en MEGA"
@@ -69,33 +69,37 @@ async def get_random_plan_file(plan_type):
             return None
         
         logging.info(f"Buscando carpeta '{folder_name}' dentro de '{MEGA_FOLDER}'")
-        plan_folder = mega.find(folder_name, root_folder[0])
+        plan_folder = mega.find(folder_name, root_folder)
         if not plan_folder:
             error_msg = f"Carpeta '{folder_name}' no encontrada en '{MEGA_FOLDER}'"
             logging.error(error_msg)
             return None
         
-        # Filtrar archivos PDF
+        # Filtrar archivos PDF (nuevo formato)
         logging.info(f"Obteniendo archivos de la carpeta '{folder_name}'")
-        files = mega.get_files_in_node(plan_folder[0])
+        files = mega.get_files_in_node(plan_folder)
         if not files:
             error_msg = f"No se encontraron archivos en '{folder_name}'"
             logging.error(error_msg)
             return None
         
-        pdf_files = [f for f in files.values() if f['a']['n'].lower().endswith('.pdf')]
+        # Convertir el diccionario de archivos a lista
+        files_list = list(files.values())
+        pdf_files = [f for f in files_list if isinstance(f, dict) and 
+                   f.get('a', {}).get('n', '').lower().endswith('.pdf')]
         
         if not pdf_files:
-            error_msg = f"No hay PDFs en '{folder_name}' (se encontraron {len(files)} archivos)"
+            error_msg = f"No hay PDFs en '{folder_name}' (se encontraron {len(files_list)} archivos)"
             logging.error(error_msg)
             return None
         
         # Descargar archivo temporal
         selected_file = random.choice(pdf_files)
         temp_dir = tempfile.gettempdir()
-        local_path = os.path.join(temp_dir, selected_file['a']['n'])
+        file_name = selected_file['a']['n']
+        local_path = os.path.join(temp_dir, file_name)
         
-        logging.info(f"Descargando archivo: {selected_file['a']['n']}")
+        logging.info(f"Descargando archivo: {file_name}")
         download_url = mega.get_upload_link(selected_file)
         if not download_url:
             error_msg = "No se pudo obtener URL de descarga"
