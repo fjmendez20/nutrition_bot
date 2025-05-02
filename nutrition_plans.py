@@ -9,10 +9,9 @@ from datetime import datetime
 from mega import Mega
 import tempfile
 import logging
+from config import config
 
-# Configuración de MEGA (usa variables de entorno en producción)
-MEGA_EMAIL = os.getenv('MEGA_EMAIL', 'tu_email@example.com')
-MEGA_PASSWORD = os.getenv('MEGA_PASSWORD', 'tu_contraseña')
+
 MEGA_FOLDER = 'nutrition_plans'
 
 # Mapeo de tipos de plan a carpetas
@@ -34,7 +33,7 @@ def initialize_mega():
     if mega is None:
         try:
             mega = Mega()
-            mega.login(MEGA_EMAIL, MEGA_PASSWORD)
+            mega.login(config.MEGA_EMAIL, config.MEGA_PASSWORD)
             logging.info("Conexión con MEGA establecida")
         except Exception as e:
             logging.error(f"Error al conectar con MEGA: {str(e)}")
