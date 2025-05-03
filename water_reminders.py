@@ -54,27 +54,35 @@ def calculate_water_goal(weight_kg: float) -> float:
     return weight_kg * 35
 
 async def handle_water_reminder(update: Update, context: CallbackContext):
-    """Manejador principal para los recordatorios de agua"""
-    query = update.callback_query
-    await query.answer()
+    """Manejador de recordatorios de agua con verificación de registro"""
+    try:
+        query = update.callback_query
+        await query.answer()
+        
+        # Verificar registro primero
+        if not await check_user_registered(update, context):
+            return
+        db = get_db_session()
+        user = db.query(User).filter_by(telegram_id=query.from_user.id).first()
+        
+        if not user or not user.weight:
+            context.user_data['awaiting_weight'] = True
+            await query.edit_message_text(
+                "💧 Para configurar recordatorios de hidratación:\n\n"
+                "Por favor ingresa tu peso actual en kilogramos (ejemplo: 65.5):",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔙 Menú principal", callback_data='main_menu')]
+                ])
+            )
+            return
     
-    db = get_db_session()
-    user = db.query(User).filter_by(telegram_id=query.from_user.id).first()
-    
-    if not user or not user.weight:
-        context.user_data['awaiting_weight'] = True
+        # Mostrar directamente el progreso con el teclado de registrar agua
+        await show_water_progress(query, user)
+    except Exception as e:
+        logger.error(f"Error en handle_water_reminder: {e}")
         await query.edit_message_text(
-            "💧 Para configurar recordatorios de hidratación:\n\n"
-            "Por favor ingresa tu peso actual en kilogramos (ejemplo: 65.5):",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 Menú principal", callback_data='main_menu')]
-            ])
+            "⚠️ Ocurrió un error al configurar recordatorios. Intenta nuevamente."
         )
-        return
-    
-    # Mostrar directamente el progreso con el teclado de registrar agua
-    await show_water_progress(query, user)
-
 async def handle_water_progress(update: Update, context: CallbackContext):
     """Muestra el progreso actual de hidratación"""
     query = update.callback_query

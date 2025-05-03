@@ -10,6 +10,36 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 
 Base = declarative_base()
 
+def user_exists(telegram_id: int) -> bool:
+    """Verifica si un usuario ya está registrado"""
+    db = next(get_db_session())
+    try:
+        return db.query(User).filter_by(telegram_id=telegram_id).first() is not None
+    finally:
+        db.close()
+
+def get_or_create_user(telegram_id: int, username: str = None, first_name: str = None, last_name: str = None) -> User:
+    """Obtiene un usuario existente o crea uno nuevo"""
+    db = next(get_db_session())
+    try:
+        user = db.query(User).filter_by(telegram_id=telegram_id).first()
+        
+        if not user:
+            user = User(
+                telegram_id=telegram_id,
+                username=username,
+                first_name=first_name,
+                last_name=last_name,
+                registered_at=datetime.utcnow()
+            )
+            db.add(user)
+            db.commit()
+        
+        return user
+    finally:
+        db.close()
+        
+        
 class User(Base):
     __tablename__ = 'users'
     

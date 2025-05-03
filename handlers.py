@@ -25,6 +25,9 @@ import traceback
 import asyncio
 import telegram
 
+class UnregisteredUserError(Exception):
+    """Excepción para usuarios no registrados"""
+    pass
 
 # Configuración avanzada de logging
 logging.basicConfig(
@@ -35,6 +38,30 @@ logger = logging.getLogger(__name__)
 
 # Configuración de timeout para la base de datos
 DB_TIMEOUT = 10
+
+async def send_message_with_retry(update, text, reply_markup=None, parse_mode=None, max_retries=3):
+    """Envía un mensaje con mecanismo de reintento"""
+    for attempt in range(max_retries):
+        try:
+            if update.callback_query:
+                await update.callback_query.edit_message_text(
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
+            else:
+                await update.message.reply_text(
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
+            return True
+        except Exception as send_error:
+            if attempt == max_retries - 1:
+                raise
+            logger.warning(f"Intento {attempt + 1} fallido: {send_error}")
+            await asyncio.sleep(1 + attempt)  # Backoff incremental
+    return False
 
 def obtener_saludo_por_hora():
     """Devuelve un saludo según la hora del día"""
@@ -58,54 +85,75 @@ MENSAJES_NUTRICIONALES = [
 ]
 
 async def start(update: Update, context: CallbackContext):
-    """Manejador mejorado del comando /start"""
+    """Manejador mejorado del comando /start con registro único"""
     try:
         user = update.effective_user
         logger.info(f"Iniciando interacción con usuario ID: {user.id}")
         
         # Registro en base de datos con manejo de timeout
+        db = None
         try:
             db = get_db_session()
             db_user = db.query(User).filter_by(telegram_id=user.id).first()
             
-            if not db_user:
+            if db_user:
+                logger.info(f"Usuario existente: {user.id}")
+                mensaje = (
+                    f"👋 ¡Hola de nuevo, {user.first_name or 'Usuario'}!\n\n"
+                    "Ya estás registrado en nuestro sistema. ¿En qué puedo ayudarte hoy?"
+                )
+            else:
                 logger.info(f"Registrando nuevo usuario: {user.id}")
                 db_user = User(
                     telegram_id=user.id,
                     username=user.username,
                     first_name=user.first_name,
-                    last_name=user.last_name
+                    last_name=user.last_name,
+                    registered_at=datetime.utcnow()  # Asegurar fecha de registro
                 )
                 db.add(db_user)
                 db.commit()
+                mensaje = (
+                    f"🎉 ¡Bienvenido/a {user.first_name or 'Nuevo Usuario'}!\n\n"
+                    "Te has registrado correctamente en nuestro sistema de seguimiento nutricional. "
+                    "Ahora puedes comenzar a registrar tu consumo de agua y acceder a los planes nutricionales."
+                )
+            
+            # Preparar mensaje personalizado según hora
+            saludo = obtener_saludo_por_hora()
+            user_name = user.first_name or "Usuario"
+            hora_actual = datetime.now().hour
+            
+            # Seleccionar mensaje contextual
+            if hora_actual >= 19 or hora_actual < 5:
+                mensaje_contextual = MENSAJES_NUTRICIONALES[7].format(saludo=saludo, user_name=user_name)
+            else:
+                mensaje_contextual = random.choice(MENSAJES_NUTRICIONALES[:7]).format(saludo=saludo, user_name=user_name)
+            
+            # Combinar mensajes
+            full_message = f"{mensaje}\n\n{mensaje_contextual}"
+            
+            # Envío del mensaje con reintentos
+            await send_message_with_retry(
+                update=update,
+                text=full_message,
+                reply_markup=main_menu_keyboard(),
+                parse_mode="HTML",
+                max_retries=3
+            )
+
         except Exception as db_error:
             logger.error(f"Error en DB: {db_error}\n{traceback.format_exc()}")
-            # Continuamos aunque falle la DB
-        
-        # Preparar mensaje personalizado
-        user_name = user.first_name or "NutriAmigo/a"
-        saludo = obtener_saludo_por_hora()
-        hora_actual = datetime.now().hour
-        
-        mensaje = (MENSAJES_NUTRICIONALES[7].format(saludo=saludo, user_name=user_name) 
-                  if hora_actual >= 19 or hora_actual < 5 
-                  else random.choice(MENSAJES_NUTRICIONALES[:7]).format(saludo=saludo, user_name=user_name))
-        
-        # Envío del mensaje con reintentos
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                await update.message.reply_text(
-                    mensaje,
-                    reply_markup=main_menu_keyboard(),
-                    parse_mode="HTML"
-                )
-                break
-            except Exception as send_error:
-                if attempt == max_retries - 1:
-                    raise
-                logger.warning(f"Intento {attempt + 1} fallido: {send_error}")
-                await asyncio.sleep(1)
+            # Mensaje de fallback sin dependencia de DB
+            await update.message.reply_text(
+                "¡Hola! Bienvenido al bot de seguimiento nutricional. "
+                "Estamos teniendo problemas técnicos momentáneos. "
+                "Por favor, inténtalo nuevamente más tarde.",
+                reply_markup=main_menu_keyboard()
+            )
+        finally:
+            if db:
+                db.close()
 
     except Exception as e:
         logger.error(f"Error crítico en start: {e}\n{traceback.format_exc()}")
@@ -119,35 +167,26 @@ async def error_handler(update: Update, context: CallbackContext):
     error = context.error
     logger.error(f"Error global: {error}\n{traceback.format_exc()}")
     
-    if update.callback_query:
-        try:
+    try:
+        if update.callback_query:
             await update.callback_query.answer("⚠️ Error al procesar tu acción")
-        except:
-            pass
-    
-    if update.effective_message:
-        await update.effective_message.reply_text(
-            "⚠️ Error procesando tu solicitud. Intenta nuevamente."
-        )
-
-    if isinstance(error, telegram.error.TimedOut):
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                await asyncio.sleep(1 + attempt)  # Backoff exponencial
+        
+        # Mensaje específico para usuarios no registrados
+        if isinstance(error, UnregisteredUserError):
+            if update.effective_message:
                 await update.effective_message.reply_text(
-                    f"⚠️ Timeout (intento {attempt + 1}). Reintentando..."
+                    "🔐 Para usar esta función, primero debes registrarte con /start"
                 )
-                return
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    await update.effective_message.reply_text(
-                        "🔴 Servicio ocupado. Por favor, inténtalo más tarde."
-                    )
-    else:
-        await update.effective_message.reply_text(
-            "⚠️ Error inesperado. Nuestro equipo ha sido notificado."
-        )
+            return
+                
+        # Mensaje genérico para otros errores
+        if update.effective_message:
+            await update.effective_message.reply_text(
+                "⚠️ Error procesando tu solicitud. Intenta nuevamente."
+            )
+
+    except Exception as handler_error:
+        logger.error(f"Error en el manejador de errores: {handler_error}")
 
 async def main_menu(update: Update, context: CallbackContext):
     """Manejador optimizado para el menú principal"""
@@ -185,13 +224,41 @@ async def main_menu(update: Update, context: CallbackContext):
             await update.callback_query.message.reply_text(
                 "❌ No pude actualizar el menú. Por favor, usa /start para reiniciar."
             )
-
+async def check_user_registered(update: Update, context: CallbackContext):
+    """Verifica si el usuario está registrado antes de ejecutar acciones"""
+    user = update.effective_user
+    db = None
+    try:
+        db = get_db_session()
+        user_exists = db.query(User).filter_by(telegram_id=user.id).first() is not None
+        
+        if not user_exists:
+            logger.warning(f"Usuario no registrado intentando acceder: {user.id}")
+            await update.callback_query.answer(
+                "⚠️ Debes registrarte primero con /start",
+                show_alert=True
+            )
+            return False
+        
+        return True
+    except Exception as e:
+        logger.error(f"Error verificando registro: {e}")
+        await update.callback_query.answer(
+            "🔴 Error verificando tu registro. Intenta más tarde.",
+            show_alert=True
+        )
+        return False
+    finally:
+        if db:
+            db.close()
+            
+            
 def setup_handlers(application):
-    """Configuración mejorada con logging de diagnóstico"""
+    """Configuración mejorada con verificación de registro"""
     # Comandos
     application.add_handler(CommandHandler('start', start))
     
-    # Handlers principales (asegúrate que los patrones coincidan con tus keyboards)
+    # Handlers principales con verificación
     main_handlers = [
         (CallbackQueryHandler(handle_water_reminder, pattern='^water_reminder$'), "Recordatorio de agua"),
         (CallbackQueryHandler(handle_nutrition_plan_selection, pattern='^nutrition_plans$'), "Planes nutricionales"),
@@ -204,15 +271,21 @@ def setup_handlers(application):
     ]
     
     for handler, description in main_handlers:
+        # Añade verificación de registro a todos los handlers excepto start y main_menu
+        if description not in ["Menú principal"]:
+            handler.callback = add_registration_check(handler.callback)
         application.add_handler(handler)
-        logger.info(f"Handler registrado: {description} - Patrón: {handler.pattern}")
-    
-    # Mensajes de texto
-    application.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND & ~filters.Regex(r'^\/'),
-        handle_weight_input
-    ))
+        logger.info(f"Handler registrado: {description}")
     
     # Error handler
     application.add_error_handler(error_handler)
     logger.info("Todos los handlers configurados correctamente")
+    
+    
+def add_registration_check(handler_func):
+    """Decorador para añadir verificación de registro"""
+    async def wrapped(update: Update, context: CallbackContext):
+        if not await check_user_registered(update, context):
+            raise UnregisteredUserError()
+        return await handler_func(update, context)
+    return wrapped
