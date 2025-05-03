@@ -1,45 +1,25 @@
 import os
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from config import Config
+from sqlalchemy.orm import sessionmaker, scoped_session
 from datetime import datetime
+import logging
+from typing import Optional
 
+# Configuración básica de logging
+logging.basicConfig()
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Obtener URL de la base de datos
 DATABASE_URL = os.getenv('DATABASE_URL')
 
+# Ajustar URL para SQLAlchemy (postgres:// → postgresql://)
+if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
 
 Base = declarative_base()
 
-def user_exists(telegram_id: int) -> bool:
-    """Verifica si un usuario ya está registrado"""
-    db = next(get_db_session())
-    try:
-        return db.query(User).filter_by(telegram_id=telegram_id).first() is not None
-    finally:
-        db.close()
-
-def get_or_create_user(telegram_id: int, username: str = None, first_name: str = None, last_name: str = None) -> User:
-    """Obtiene un usuario existente o crea uno nuevo"""
-    db = next(get_db_session())
-    try:
-        user = db.query(User).filter_by(telegram_id=telegram_id).first()
-        
-        if not user:
-            user = User(
-                telegram_id=telegram_id,
-                username=username,
-                first_name=first_name,
-                last_name=last_name,
-                registered_at=datetime.utcnow()
-            )
-            db.add(user)
-            db.commit()
-        
-        return user
-    finally:
-        db.close()
-        
-        
 class User(Base):
     __tablename__ = 'users'
     
@@ -85,13 +65,64 @@ class Payment(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime)
 
-# Configuración de la base de datos
-if DATABASE_URL.startswith('postgres://'):
-    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+# Configuración del motor de base de datos
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True,
+    pool_recycle=300
+)
 
-engine = create_engine(DATABASE_URL)
+# Crear todas las tablas si no existen
 Base.metadata.create_all(engine)
-Session = sessionmaker(bind=engine)
+
+# Configuración de la sesión
+SessionFactory = sessionmaker(bind=engine)
+Session = scoped_session(SessionFactory)
 
 def get_db_session():
+    """Obtiene una nueva sesión de base de datos con manejo seguro"""
     return Session()
+
+def user_exists(telegram_id: int) -> bool:
+    """Verifica si un usuario ya está registrado"""
+    db = get_db_session()
+    try:
+        return db.query(User).filter_by(telegram_id=telegram_id).first() is not None
+    except Exception as e:
+        logger.error(f"Error en user_exists: {str(e)}")
+        raise
+    finally:
+        db.close()
+
+def get_or_create_user(telegram_id: int, 
+                     username: Optional[str] = None, 
+                     first_name: Optional[str] = None, 
+                     last_name: Optional[str] = None) -> User:
+    """Obtiene un usuario existente o crea uno nuevo"""
+    db = get_db_session()
+    try:
+        user = db.query(User).filter_by(telegram_id=telegram_id).first()
+        
+        if not user:
+            user = User(
+                telegram_id=telegram_id,
+                username=username,
+                first_name=first_name,
+                last_name=last_name,
+                registered_at=datetime.utcnow()
+            )
+            db.add(user)
+            db.commit()
+            logger.info(f"Nuevo usuario creado: {telegram_id}")
+        else:
+            logger.info(f"Usuario existente encontrado: {telegram_id}")
+        
+        return user
+    except Exception as e:
+        logger.error(f"Error en get_or_create_user: {str(e)}")
+        db.rollback()
+        raise
+    finally:
+        db.close()
