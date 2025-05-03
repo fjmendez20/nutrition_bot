@@ -7,6 +7,33 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+async def check_user_registered(update: Update, context: CallbackContext) -> bool:
+    """Verifica si el usuario está registrado antes de ejecutar acciones"""
+    user = update.effective_user
+    db = get_db_session()
+    try:
+        user_exists = db.query(User).filter_by(telegram_id=user.id).first() is not None
+        
+        if not user_exists:
+            logger.warning(f"Usuario no registrado intentando acceder: {user.id}")
+            await update.callback_query.answer(
+                "⚠️ Debes registrarte primero con /start",
+                show_alert=True
+            )
+            return False
+        
+        return True
+    except Exception as e:
+        logger.error(f"Error verificando registro: {e}")
+        await update.callback_query.answer(
+            "🔴 Error verificando tu registro. Intenta más tarde.",
+            show_alert=True
+        )
+        return False
+    finally:
+        db.close()
+
+
 async def handle_weight_input(update: Update, context: CallbackContext):
     """Maneja la entrada del peso del usuario"""
     user_id = update.message.from_user.id
@@ -48,6 +75,8 @@ async def handle_weight_input(update: Update, context: CallbackContext):
                 [InlineKeyboardButton("🔙 Menú principal", callback_data='main_menu')]
             ])
         )
+    finally:
+        db.close()
 
 def calculate_water_goal(weight_kg: float) -> float:
     """Calcula la meta diaria de agua en ml (35ml por kg de peso)"""
@@ -62,6 +91,7 @@ async def handle_water_reminder(update: Update, context: CallbackContext):
         # Verificar registro primero
         if not await check_user_registered(update, context):
             return
+            
         db = get_db_session()
         user = db.query(User).filter_by(telegram_id=query.from_user.id).first()
         
@@ -83,6 +113,9 @@ async def handle_water_reminder(update: Update, context: CallbackContext):
         await query.edit_message_text(
             "⚠️ Ocurrió un error al configurar recordatorios. Intenta nuevamente."
         )
+    finally:
+        db.close()
+
 async def handle_water_progress(update: Update, context: CallbackContext):
     """Muestra el progreso actual de hidratación"""
     query = update.callback_query
@@ -125,6 +158,7 @@ async def show_water_progress(query, user):
             "⚠️ Ocurrió un error al mostrar tu progreso. Por favor, inténtalo de nuevo.",
             reply_markup=water_progress_keyboard()
         )
+    
 
 async def handle_water_amount(update: Update, context: CallbackContext):
     """Registra la cantidad de agua consumida con límite del 100%"""
@@ -175,6 +209,8 @@ async def handle_water_amount(update: Update, context: CallbackContext):
             "⚠️ No pude registrar tu consumo. Por favor, inténtalo de nuevo.",
             reply_markup=water_progress_keyboard()
         )
+    finally:
+        db.close()
 
 async def start_water_reminders(context: CallbackContext, user_id: int):
     """Configura los recordatorios periódicos con manejo robusto de errores"""
@@ -207,7 +243,7 @@ async def send_water_reminder(context: CallbackContext):
     """Envía el mensaje de recordatorio con manejo de errores"""
     try:
         job = context.job
-        user_id = job.data['user_id']  # Ahora accedemos a los datos así
+        user_id = job.data['user_id']
         db = get_db_session()
         user = db.query(User).filter_by(telegram_id=user_id).first()
         
@@ -224,7 +260,9 @@ async def send_water_reminder(context: CallbackContext):
             db.commit()
     except Exception as e:
         logger.error(f"Error al enviar recordatorio: {e}")
-
+    finally:
+        db.close()
+        
 async def cancel_water_reminders(update: Update, context: CallbackContext):
     """Cancela los recordatorios con confirmación"""
     query = update.callback_query
