@@ -37,6 +37,7 @@ async def check_user_registered(update: Update, context: CallbackContext) -> boo
 async def handle_weight_input(update: Update, context: CallbackContext):
     """Maneja la entrada del peso del usuario"""
     user_id = update.message.from_user.id
+    db = None
     try:
         weight = float(update.message.text.replace(',', '.'))  # Acepta tanto . como ,
         if weight <= 0 or weight > 300:
@@ -50,6 +51,10 @@ async def handle_weight_input(update: Update, context: CallbackContext):
             user.water_goal = calculate_water_goal(weight)
             user.current_water = 0  # Resetear el contador diario
             db.commit()
+            
+            # Eliminar el estado awaiting_weight
+            if 'awaiting_weight' in context.user_data:
+                del context.user_data['awaiting_weight']
             
             await update.message.reply_text(
                 f"✅ Peso registrado correctamente: {weight} kg\n"
@@ -76,7 +81,8 @@ async def handle_weight_input(update: Update, context: CallbackContext):
             ])
         )
     finally:
-        db.close()
+        if db:
+            db.close()
 
 def calculate_water_goal(weight_kg: float) -> float:
     """Calcula la meta diaria de agua en ml (35ml por kg de peso)"""
@@ -84,10 +90,11 @@ def calculate_water_goal(weight_kg: float) -> float:
 
 async def handle_water_reminder(update: Update, context: CallbackContext):
     """Manejador de recordatorios de agua con verificación de registro"""
+    query = update.callback_query
+    await query.answer()
+    
+    db = None
     try:
-        query = update.callback_query
-        await query.answer()
-        
         # Verificar registro primero
         if not await check_user_registered(update, context):
             return
@@ -99,7 +106,8 @@ async def handle_water_reminder(update: Update, context: CallbackContext):
             context.user_data['awaiting_weight'] = True
             await query.edit_message_text(
                 "💧 Para configurar recordatorios de hidratación:\n\n"
-                "Por favor ingresa tu peso actual en kilogramos (ejemplo: 65.5):",
+                "Por favor ingresa tu peso actual en kilogramos (ejemplo: 65.5):\n\n"
+                "⚠️ Envía solo el número, sin unidades.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🔙 Menú principal", callback_data='main_menu')]
                 ])
@@ -114,7 +122,8 @@ async def handle_water_reminder(update: Update, context: CallbackContext):
             "⚠️ Ocurrió un error al configurar recordatorios. Intenta nuevamente."
         )
     finally:
-        db.close()
+        if db:
+            db.close()
 
 async def handle_water_progress(update: Update, context: CallbackContext):
     """Muestra el progreso actual de hidratación"""
