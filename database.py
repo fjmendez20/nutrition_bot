@@ -1,8 +1,12 @@
+import os
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from config import Config
 from datetime import datetime
+
+DATABASE_URL = os.getenv('DATABASE_URL')
+
 
 Base = declarative_base()
 
@@ -52,7 +56,10 @@ class Payment(Base):
     completed_at = Column(DateTime)
 
 # Configuración de la base de datos
-engine = create_engine(Config.DATABASE_URL)
+if DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+
+engine = create_engine(DATABASE_URL)
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 
