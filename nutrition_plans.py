@@ -6,7 +6,7 @@ from telegram.ext import CallbackContext
 from database import get_db_session, User, PlanDownload
 from keyboards import nutrition_plans_keyboard, main_menu_keyboard
 from datetime import datetime
-from mega import Mega
+#from mega import Mega
 import tempfile
 import logging
 from config import Config
