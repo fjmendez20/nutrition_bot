@@ -76,6 +76,10 @@ engine = create_engine(
 )
 
 # Crear todas las tablas si no existen
+if os.getenv('RESET_DB_ON_START', 'false').lower() == 'true':
+    Base.metadata.drop_all(engine)  # ¡Borrará todas las tablas!
+    print("⚠️ Base de datos reiniciada")
+
 Base.metadata.create_all(engine)
 
 # Configuración de la sesión
