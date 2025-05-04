@@ -2,26 +2,27 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext
 from database import get_db_session, User, WaterLog
 from keyboards import water_amount_keyboard, water_progress_keyboard, water_reminder_keyboard
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 async def check_user_registered(update: Update, context: CallbackContext) -> bool:
-    """Verifica si el usuario está registrado antes de ejecutar acciones"""
+    """Verifica si el usuario está registrado y activo"""
     user = update.effective_user
-    db = get_db_session()
+    db = None
     try:
-        user_exists = db.query(User).filter_by(telegram_id=user.id).first() is not None
+        db = get_db_session()
+        user_record = db.query(User).filter_by(telegram_id=user.id).first()
         
-        if not user_exists:
+        if not user_record:
             logger.warning(f"Usuario no registrado intentando acceder: {user.id}")
             await update.callback_query.answer(
                 "⚠️ Debes registrarte primero con /start",
                 show_alert=True
             )
             return False
-        
         return True
     except Exception as e:
         logger.error(f"Error verificando registro: {e}")
@@ -31,71 +32,97 @@ async def check_user_registered(update: Update, context: CallbackContext) -> boo
         )
         return False
     finally:
-        db.close()
+        if db:
+            db.close()
 
 
 async def handle_weight_input(update: Update, context: CallbackContext):
-    """Maneja la entrada del peso del usuario"""
+    """Maneja la entrada del peso del usuario con validación mejorada"""
     user_id = update.message.from_user.id
     db = None
     try:
-        weight = float(update.message.text.replace(',', '.'))  # Acepta tanto . como ,
-        if weight <= 0 or weight > 300:
-            raise ValueError("Peso inválido")
+        # Validación mejorada del input
+        weight_str = update.message.text.replace(',', '.').strip()
+        if not weight_str.replace('.', '').isdigit():
+            raise ValueError("Formato inválido")
+            
+        weight = float(weight_str)
+        if not (30 <= weight <= 300):  # Rango más realista
+            raise ValueError("Peso fuera de rango")
             
         db = get_db_session()
         user = db.query(User).filter_by(telegram_id=user_id).first()
         
         if user:
             user.weight = weight
-            user.water_goal = calculate_water_goal(weight)
-            user.current_water = 0  # Resetear el contador diario
+            user.water_goal = weight * 35  # 35ml por kg
+            user.current_water = 0
             db.commit()
             
-            # Eliminar el estado awaiting_weight
-            if 'awaiting_weight' in context.user_data:
-                del context.user_data['awaiting_weight']
+            # Limpiar estado y confirmar
+            context.user_data.pop('awaiting_weight', None)
             
             await update.message.reply_text(
-                f"✅ Peso registrado correctamente: {weight} kg\n"
-                f"📌 Tu meta diaria de agua es: {user.water_goal:.0f} ml",
+                f"✅ Peso registrado: {weight} kg\n"
+                f"💧 Nueva meta diaria: {user.water_goal:.0f} ml",
                 reply_markup=water_progress_keyboard()
             )
             
-            # Iniciar recordatorios con manejo de errores
-            try:
-                await start_water_reminders(context, user_id)
-            except Exception as e:
-                logger.error(f"Error al iniciar recordatorios: {e}")
-                await update.message.reply_text(
-                    "⚠️ Se configuró tu peso pero hubo un error con los recordatorios. "
-                    "Por favor, vuelve a intentarlo más tarde.",
-                    reply_markup=water_progress_keyboard()
-                )
+            # Reiniciar recordatorios
+            await restart_water_reminders(context, user_id)
+            
     except ValueError as e:
-        logger.warning(f"Peso inválido ingresado: {update.message.text}")
+        logger.warning(f"Peso inválido: {update.message.text}")
         await update.message.reply_text(
-            "⚠️ Por favor ingresa un peso válido entre 1 y 300 kg (ejemplo: 68.5 o 72,3)",
+            "⚠️ Ingresa un peso válido (30-300 kg). Ejemplo: 68.5 o 72,3",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 Menú principal", callback_data='main_menu')]
             ])
         )
+    except Exception as e:
+        logger.error(f"Error registrando peso: {e}")
+        await update.message.reply_text("🔴 Error al registrar peso. Intenta más tarde.")
     finally:
         if db:
             db.close()
+            
+async def restart_water_reminders(context: CallbackContext, user_id: int):
+    """Reinicia los recordatorios para un usuario"""
+    try:
+        if not hasattr(context, 'job_queue') or not context.job_queue:
+            raise RuntimeError("JobQueue no disponible")
+        
+        # Cancelar jobs existentes
+        for job in context.job_queue.get_jobs_by_name(f"water_reminder_{user_id}"):
+            job.schedule_removal()
+        
+        # Programar nuevos recordatorios
+        context.job_queue.run_repeating(
+            callback=send_water_reminder,
+            interval=timedelta(hours=1),
+            first=timedelta(seconds=10),  # Primera notificación en 10 segundos
+            chat_id=user_id,
+            data={'user_id': user_id},
+            name=f"water_reminder_{user_id}"
+        )
+        logger.info(f"Recordatorios reiniciados para usuario {user_id}")
+        
+    except Exception as e:
+        logger.error(f"Error reiniciando recordatorios: {e}")
+        raise
+
 
 def calculate_water_goal(weight_kg: float) -> float:
     """Calcula la meta diaria de agua en ml (35ml por kg de peso)"""
     return weight_kg * 35
 
 async def handle_water_reminder(update: Update, context: CallbackContext):
-    """Manejador de recordatorios de agua con verificación de registro"""
+    """Manejador principal para recordatorios de agua"""
     query = update.callback_query
     await query.answer()
     
     db = None
     try:
-        # Verificar registro primero
         if not await check_user_registered(update, context):
             return
             
@@ -105,21 +132,24 @@ async def handle_water_reminder(update: Update, context: CallbackContext):
         if not user or not user.weight:
             context.user_data['awaiting_weight'] = True
             await query.edit_message_text(
-                "💧 Para configurar recordatorios de hidratación:\n\n"
-                "Por favor ingresa tu peso actual en kilogramos (ejemplo: 65.5):\n\n"
-                "⚠️ Envía solo el número, sin unidades.",
+                "⚖️ *Configuración de Peso* ⚖️\n\n"
+                "Para calcular tu meta de agua, necesito saber tu peso actual.\n\n"
+                "Por favor ingresa tu peso en kg (ejemplo: 68.5):\n\n"
+                "⚠️ Solo el número, sin unidades o texto adicional.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔙 Menú principal", callback_data='main_menu')]
-                ])
+                    [InlineKeyboardButton("↩️ Cancelar", callback_data='main_menu')]
+                ]),
+                parse_mode='Markdown'
             )
             return
     
-        # Mostrar directamente el progreso con el teclado de registrar agua
         await show_water_progress(query, user)
+        
     except Exception as e:
         logger.error(f"Error en handle_water_reminder: {e}")
         await query.edit_message_text(
-            "⚠️ Ocurrió un error al configurar recordatorios. Intenta nuevamente."
+            "⚠️ Error al procesar tu solicitud. Intenta nuevamente.",
+            reply_markup=water_reminder_keyboard()
         )
     finally:
         if db:
@@ -139,22 +169,26 @@ async def handle_water_progress(update: Update, context: CallbackContext):
     
     await show_water_progress(query, user)
 
-async def show_water_progress(query, user):
-    """Muestra el progreso de hidratación con límite del 100%"""
+async def show_water_progress(query, user: User):
+    """Muestra el progreso de hidratación con visualización mejorada"""
     try:
         progress = min((user.current_water / user.water_goal) * 100, 100) if user.water_goal else 0
-        progress_bar = "🟩" * int(progress / 10) + "⬜" * (10 - int(progress / 10))
+        progress_blocks = int(progress / 10)
+        progress_bar = "🟩" * progress_blocks + "⬜" * (10 - progress_blocks)
+        
+        remaining = max(user.water_goal - user.current_water, 0)
         
         message = (
-            f"💧 **Progreso de Hidratación** 💧\n\n"
-            f"🚰 Consumo actual: `{user.current_water:.0f} ml`\n"
+            "💧 *Estado de Hidratación* 💧\n\n"
+            f"🚰 Consumido hoy: `{user.current_water:.0f} ml`\n"
             f"🎯 Meta diaria: `{user.water_goal:.0f} ml`\n"
-            f"📊 Progreso: `{progress:.1f}%`\n\n"
+            f"📊 Progreso: `{progress:.1f}%`\n"
+            f"🔄 Restante: `{remaining:.0f} ml`\n\n"
             f"{progress_bar}\n\n"
         )
         
         if progress >= 100:
-            message += "✅ ¡Meta cumplida! ¡Buen trabajo!"
+            message += "🎉 *¡Meta alcanzada!* ¡Buen trabajo!\n"
         
         await query.edit_message_text(
             text=message,
@@ -162,9 +196,9 @@ async def show_water_progress(query, user):
             parse_mode='Markdown'
         )
     except Exception as e:
-        logger.error(f"Error al mostrar progreso: {e}")
+        logger.error(f"Error mostrando progreso: {e}")
         await query.edit_message_text(
-            "⚠️ Ocurrió un error al mostrar tu progreso. Por favor, inténtalo de nuevo.",
+            "⚠️ Error al mostrar tu progreso. Intenta más tarde.",
             reply_markup=water_progress_keyboard()
         )
     
