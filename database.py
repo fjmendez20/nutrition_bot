@@ -43,7 +43,8 @@ class WaterLog(Base):
     user_id = Column(Integer, nullable=False)
     amount = Column(Float)  # en ml
     timestamp = Column(DateTime, default=datetime.utcnow)
-
+    is_daily_reset = Column(Boolean, default=False)
+    
 class PlanDownload(Base):
     __tablename__ = 'plan_downloads'
     

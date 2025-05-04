@@ -17,7 +17,8 @@ from water_reminders import (
     handle_weight_input,
     cancel_water_reminders,
     start_water_reminders,
-    handle_register_weight
+    handle_register_weight,
+    reset_daily_water  
 )
 from nutrition_plans import handle_nutrition_plan_selection, send_random_plan
 from premium import handle_premium_payment
@@ -98,6 +99,8 @@ async def start(update: Update, context: CallbackContext):
             
             if db_user:
                 mensaje = f"👋 ¡Hola de nuevo, {user.first_name or 'Usuario'}!"
+                # Iniciar recordatorios si ya está registrado
+                await start_water_reminders(context, user.id)
             else:
                 db_user = User(
                     telegram_id=user.id,
@@ -220,10 +223,10 @@ def setup_handlers(application):
         ('water_reminder', handle_water_reminder),
         ('nutrition_plans', handle_nutrition_plan_selection),
         ('premium', handle_premium_payment),
-        ('water_amount_[0-9]+', handle_water_amount),  # Cambiado para capturar los números
+        ('water_amount_[0-9]+', handle_water_amount),
         ('water_progress', handle_water_progress),
         ('cancel_water_reminders', cancel_water_reminders),
-        ('plan_[a-zA-Z_]+', send_random_plan)  # También ajustado para mejor manejo
+        ('plan_[a-zA-Z_]+', send_random_plan)
     ]
     
     for pattern, handler in protected_handlers:
@@ -246,6 +249,20 @@ def setup_handlers(application):
         filters.TEXT & (~filters.COMMAND) & filters.Regex(r'^\d+([,.]\d+)?$'),
         handle_weight_input
     ))
+    
+    # Configurar el reinicio diario a las 00:00
+    try:
+        # Verificar si ya existe un job de reinicio diario
+        if not any(job.name == "daily_reset" for job in application.job_queue.jobs()):
+            application.job_queue.run_daily(
+                callback=reset_daily_water,
+                time=datetime.strptime("00:00", "%H:%M").time(),
+                name="daily_reset",
+                chat_id=None  # Job global, no asociado a un chat específico
+            )
+            logger.info("Job de reinicio diario configurado correctamente")
+    except Exception as e:
+        logger.error(f"Error al configurar el job de reinicio diario: {e}")
     
     # Error handler
     application.add_error_handler(error_handler)

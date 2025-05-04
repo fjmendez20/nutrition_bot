@@ -194,10 +194,15 @@ async def show_water_progress(query, user: User):
         
         if progress >= 100:
             message += "🎉 *¡Meta alcanzada!* ¡Buen trabajo!\n"
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🏠 Menú principal", callback_data='main_menu')]
+            ])
+        else:
+            keyboard = water_progress_keyboard()
         
         await query.edit_message_text(
             text=message,
-            reply_markup=water_progress_keyboard(),
+            reply_markup=keyboard,
             parse_mode='Markdown'
         )
     except Exception as e:
@@ -216,16 +221,27 @@ async def handle_water_amount(update: Update, context: CallbackContext):
     
     db = None
     try:
-        amount = float(query.data.split('_')[-1])
+        user_id = query.from_user.id
         db = get_db_session()
-        user = db.query(User).filter_by(telegram_id=query.from_user.id).first()
+        user = db.query(User).filter_by(telegram_id=user_id).first()
         
         if not user:
             await query.edit_message_text("❌ No se encontraron tus datos. Por favor, reinicia el bot.")
             return
             
-        # Calcular nuevo valor sin exceder el 100%
-        new_amount = min(user.current_water + amount, user.water_goal)  # Nota: hay un typo aquí ("water_goal")
+        # Verificar si ya alcanzó la meta
+        if user.current_water >= user.water_goal:
+            await query.edit_message_text(
+                "🎉 ¡Ya alcanzaste tu meta diaria! ¡Buen trabajo!\n\n"
+                "Puedes registrar nuevo consumo mañana.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🏠 Menú principal", callback_data='main_menu')]
+                ])
+            )
+            return
+            
+        amount = float(query.data.split('_')[-1])
+        new_amount = min(user.current_water + amount, user.water_goal)
         added_amount = new_amount - user.current_water
         user.current_water = new_amount
         
@@ -283,15 +299,24 @@ async def start_water_reminders(context: CallbackContext, user_id: int):
         for job in current_jobs:
             job.schedule_removal()
         
-        # Programar nuevo job con intervalo configurable
+        # Programar recordatorios horarios
         context.job_queue.run_repeating(
             callback=send_water_reminder,
             interval=3600,  # 1 hora
-            first=3600,       # Primera ejecución en 5 segundos (para pruebas)
-            chat_id=user_id,  # Nuevo parámetro requerido
-            data={'user_id': user_id},  # Datos adicionales
+            first=10,       # Primera ejecución en 10 segundos
+            chat_id=user_id,
+            data={'user_id': user_id},
             name=f"water_reminder_{user_id}"
         )
+        
+        # Programar reinicio diario a las 00:00 (si no existe ya)
+        if not any(job.name == "daily_reset" for job in context.job_queue.jobs()):
+            context.job_queue.run_daily(
+                callback=reset_daily_water,
+                time=datetime.strptime("00:00", "%H:%M").time(),
+                name="daily_reset"
+            )
+        
         logger.info(f"Recordatorios configurados para usuario {user_id}")
         
     except Exception as e:
@@ -358,3 +383,29 @@ async def cancel_water_reminders(update: Update, context: CallbackContext):
                 [InlineKeyboardButton("🔙 Menú principal", callback_data='main_menu')]
             ])
         )
+    async def reset_daily_water(context: CallbackContext):
+        """Reinicia el contador de agua diario para todos los usuarios"""
+        db = None
+        try:
+            db = get_db_session()
+            users = db.query(User).filter(User.water_goal.isnot(None)).all()
+            
+            for user in users:
+                user.current_water = 0
+                db.add(WaterLog(
+                    user_id=user.id,
+                    amount=0,
+                    timestamp=datetime.utcnow(),
+                    is_daily_reset=True
+                ))
+                # Reiniciar recordatorios
+                await restart_water_reminders(context, user.telegram_id)
+            
+            db.commit()
+            logger.info(f"Reinicio diario completado para {len(users)} usuarios")
+            
+        except Exception as e:
+            logger.error(f"Error en reset_daily_water: {e}")
+        finally:
+            if db:
+                db.close()
