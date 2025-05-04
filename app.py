@@ -11,13 +11,15 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder
 from telegram import Update
 from config import Config
-import logging
-import os
+from datetime import datetime, time
+from water_reminders import reset_daily_water  # Añade esto con los otros imports
 from flask import Flask, request, jsonify
 from telegram.request import HTTPXRequest
 import threading
 import time
 import requests
+import logging
+import os
 
 # Configuración básica de logging
 logging.basicConfig(
@@ -41,9 +43,25 @@ class BotManager:
             pool_timeout=30.0
         )
         self._init_lock = threading.Lock()
-        self._async_init_lock = None  # Se inicializará en el event loop
+        self._async_init_lock = None
         self._start_background_loop()
         self.initialize()
+    
+    async def _setup_daily_reset(self):
+        """Configura el job de reinicio diario"""
+        try:
+            # Verifica si ya existe un job de reinicio
+            if not any(job.name == "daily_reset" for job in self.application.job_queue.jobs()):
+                # Configura para ejecutarse diariamente a las 00:00 (medianoche)
+                self.application.job_queue.run_daily(
+                    callback=reset_daily_water,
+                    time=time(0, 0),  # 00:00 (medianoche)
+                    days=(0, 1, 2, 3, 4, 5, 6),  # Todos los días de la semana
+                    name="daily_reset"
+                )
+                logger.info("Job de reinicio diario configurado correctamente")
+        except Exception as e:
+            logger.error(f"Error configurando el reinicio diario: {e}")
 
     def _start_background_loop(self):
         def run_loop():
@@ -63,11 +81,10 @@ class BotManager:
         self._async_init_lock = asyncio.Lock()
 
     async def _initialize(self):
-        # Usamos el lock síncrono para protección entre threads
         with self._init_lock:
             if self.application is None:
                 if self._async_init_lock is None:
-                    await asyncio.sleep(0.1)  # Espera breve si el lock no está listo
+                    await asyncio.sleep(0.1)
                 
                 async with self._async_init_lock:
                     self.application = (
@@ -83,6 +100,10 @@ class BotManager:
                     
                     await self.application.initialize()
                     await self.application.start()
+                    
+                    # Configurar el reinicio diario después de iniciar
+                    await self._setup_daily_reset()
+                    
                     logger.info("Bot inicializado correctamente")
 
     def initialize(self):

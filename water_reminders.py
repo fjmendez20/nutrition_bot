@@ -8,6 +8,41 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+async def reset_daily_water(context: CallbackContext):
+    try:
+        db = get_db_session()
+        users = db.query(User).filter(User.water_goal.isnot(None)).all()
+        
+        if not users:
+            logger.info("No hay usuarios para reiniciar")
+            return
+            
+        for user in users:
+            try:
+                user.current_water = 0
+                db.add(WaterLog(
+                    user_id=user.id,
+                    amount=0,
+                    timestamp=datetime.utcnow(),
+                    is_daily_reset=True
+                ))
+                await restart_water_reminders(context, user.telegram_id)
+            except Exception as e:
+                logger.error(f"Error reiniciando usuario {user.telegram_id}: {e}")
+                continue
+                
+        db.commit()
+        logger.info(f"Reinicio diario completado para {len(users)} usuarios")
+        
+    except Exception as e:
+        logger.error(f"Error crítico en reset_daily_water: {e}")
+        # Intenta recuperar la sesión si hay error
+        if 'db' in locals() and db:
+            db.rollback()
+    finally:
+        if 'db' in locals() and db:
+            db.close()
+
 async def handle_register_weight(update: Update, context: CallbackContext):
     """Manejador para el botón de registro de peso"""
     query = update.callback_query
@@ -23,6 +58,7 @@ async def handle_register_weight(update: Update, context: CallbackContext):
     )
 
 
+                
 async def check_user_registered(update: Update, context: CallbackContext) -> bool:
     """Verifica si el usuario está registrado y activo"""
     user = update.effective_user
@@ -383,29 +419,3 @@ async def cancel_water_reminders(update: Update, context: CallbackContext):
                 [InlineKeyboardButton("🔙 Menú principal", callback_data='main_menu')]
             ])
         )
-    async def reset_daily_water(context: CallbackContext):
-        """Reinicia el contador de agua diario para todos los usuarios"""
-        db = None
-        try:
-            db = get_db_session()
-            users = db.query(User).filter(User.water_goal.isnot(None)).all()
-            
-            for user in users:
-                user.current_water = 0
-                db.add(WaterLog(
-                    user_id=user.id,
-                    amount=0,
-                    timestamp=datetime.utcnow(),
-                    is_daily_reset=True
-                ))
-                # Reiniciar recordatorios
-                await restart_water_reminders(context, user.telegram_id)
-            
-            db.commit()
-            logger.info(f"Reinicio diario completado para {len(users)} usuarios")
-            
-        except Exception as e:
-            logger.error(f"Error en reset_daily_water: {e}")
-        finally:
-            if db:
-                db.close()
