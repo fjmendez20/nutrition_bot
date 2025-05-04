@@ -117,7 +117,7 @@ async def start(update: Update, context: CallbackContext):
             
             await send_message_with_retry(
                 update=update,
-                text=f"{mensaje}\n\n{mensaje_contextual}",
+                text=f"{mensaje_contextual}",
                 reply_markup=main_menu_keyboard(),
                 parse_mode="HTML"
             )
