@@ -211,54 +211,65 @@ async def show_water_progress(query, user: User):
 async def handle_water_amount(update: Update, context: CallbackContext):
     """Registra la cantidad de agua consumida con límite del 100%"""
     query = update.callback_query
+    logger.info(f"Callback recibido en handle_water_amount: {query.data}")
     await query.answer()
     
+    db = None
     try:
         amount = float(query.data.split('_')[-1])
         db = get_db_session()
         user = db.query(User).filter_by(telegram_id=query.from_user.id).first()
         
-        if user:
-            # Calcular nuevo valor sin exceder el 100%
-            new_amount = min(user.current_water + amount, user.water_goal)
-            added_amount = new_amount - user.current_water
-            user.current_water = new_amount
+        if not user:
+            await query.edit_message_text("❌ No se encontraron tus datos. Por favor, reinicia el bot.")
+            return
             
-            db.add(WaterLog(
-                user_id=user.id,
-                amount=added_amount,
-                timestamp=datetime.utcnow()
-            ))
-            db.commit()
+        # Calcular nuevo valor sin exceder el 100%
+        new_amount = min(user.current_water + amount, user.water_goal)  # Nota: hay un typo aquí ("water_goal")
+        added_amount = new_amount - user.current_water
+        user.current_water = new_amount
+        
+        db.add(WaterLog(
+            user_id=user.id,
+            amount=added_amount,
+            timestamp=datetime.utcnow()
+        ))
+        db.commit()
+        
+        # Verificar si se alcanzó la meta
+        if user.current_water >= user.water_goal:
+            await query.edit_message_text(
+                "🎉 ¡Felicidades! ¡Has alcanzado tu meta diaria de hidratación! 🎉\n"
+                f"💧 Consumo total hoy: {user.current_water:.0f} ml\n\n"
+                "Los recordatorios se desactivarán hasta mañana.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🏠 Menú principal", callback_data='main_menu')]
+                ])
+            )
             
-            # Verificar si se alcanzó la meta
-            if user.current_water >= user.water_goal:
-                await query.edit_message_text(
-                    "🎉 ¡Felicidades! ¡Has alcanzado tu meta diaria de hidratación! 🎉\n"
-                    f"💧 Consumo total hoy: {user.current_water:.0f} ml\n\n"
-                    "Los recordatorios se desactivarán hasta mañana.",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("🏠 Menú principal", callback_data='main_menu')]
-                    ])
-                )
-                
-                # Cancelar recordatorios
+            # Cancelar recordatorios
+            if context.job_queue:
                 current_jobs = context.job_queue.get_jobs_by_name(f"water_reminder_{user.telegram_id}")
                 for job in current_jobs:
                     job.schedule_removal()
-                
-                return
-            
-            await show_water_progress(query, user)
-            
+            return
+        
+        await show_water_progress(query, user)
+        
+    except ValueError:
+        await query.edit_message_text(
+            "⚠️ Cantidad inválida. Por favor, usa los botones proporcionados.",
+            reply_markup=water_progress_keyboard()
+        )
     except Exception as e:
-        logger.error(f"Error al registrar agua: {e}")
+        logger.error(f"Error al registrar agua: {str(e)}", exc_info=True)
         await query.edit_message_text(
             "⚠️ No pude registrar tu consumo. Por favor, inténtalo de nuevo.",
             reply_markup=water_progress_keyboard()
         )
     finally:
-        db.close()
+        if db:
+            db.close()
 
 async def start_water_reminders(context: CallbackContext, user_id: int):
     """Configura los recordatorios periódicos con manejo robusto de errores"""

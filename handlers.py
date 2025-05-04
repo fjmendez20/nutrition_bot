@@ -220,10 +220,10 @@ def setup_handlers(application):
         ('water_reminder', handle_water_reminder),
         ('nutrition_plans', handle_nutrition_plan_selection),
         ('premium', handle_premium_payment),
-        ('water_amount_', handle_water_amount),
+        ('water_amount_[0-9]+', handle_water_amount),  # Cambiado para capturar los números
         ('water_progress', handle_water_progress),
         ('cancel_water_reminders', cancel_water_reminders),
-        ('plan_', send_random_plan)
+        ('plan_[a-zA-Z_]+', send_random_plan)  # También ajustado para mejor manejo
     ]
     
     for pattern, handler in protected_handlers:
