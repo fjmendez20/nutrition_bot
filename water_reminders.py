@@ -339,7 +339,7 @@ async def start_water_reminders(context: CallbackContext, user_id: int):
         context.job_queue.run_repeating(
             callback=send_water_reminder,
             interval=3600,  # 1 hora
-            first=10,       # Primera ejecución en 10 segundos
+            first=3600,       # Primera ejecución en 10 segundos
             chat_id=user_id,
             data={'user_id': user_id},
             name=f"water_reminder_{user_id}"
