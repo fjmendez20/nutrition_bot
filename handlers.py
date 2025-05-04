@@ -16,7 +16,8 @@ from water_reminders import (
     handle_water_progress,
     handle_weight_input,
     cancel_water_reminders,
-    start_water_reminders
+    start_water_reminders,
+    handle_register_weight
 )
 from nutrition_plans import handle_nutrition_plan_selection, send_random_plan
 from premium import handle_premium_payment
@@ -231,6 +232,11 @@ def setup_handlers(application):
             pattern=f'^{pattern}$'
         )
         application.add_handler(wrapped_handler)
+    
+    application.add_handler(CallbackQueryHandler(
+        handle_register_weight,
+        pattern='^register_weight$'
+    ))
     
     # Handlers sin verificación de registro
     application.add_handler(CallbackQueryHandler(main_menu, pattern='^main_menu$'))

@@ -1,12 +1,27 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext
 from database import get_db_session, User, WaterLog
-from keyboards import water_amount_keyboard, water_progress_keyboard, water_reminder_keyboard
+from keyboards import water_amount_keyboard, water_progress_keyboard, water_reminder_keyboard,weight_input_keyboard
 from datetime import datetime, timedelta
 import logging
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+async def handle_register_weight(update: Update, context: CallbackContext):
+    """Manejador para el botón de registro de peso"""
+    query = update.callback_query
+    await query.answer()
+    
+    context.user_data['awaiting_weight'] = True
+    await query.edit_message_text(
+        "⚖️ *Registro de Peso* ⚖️\n\n"
+        "Por favor ingresa tu peso actual en kilogramos (ejemplo: 68.5):\n\n"
+        "⚠️ Solo el número, sin unidades o texto adicional.",
+        reply_markup=weight_input_keyboard(),
+        parse_mode='Markdown'
+    )
+
 
 async def check_user_registered(update: Update, context: CallbackContext) -> bool:
     """Verifica si el usuario está registrado y activo"""
@@ -38,16 +53,18 @@ async def check_user_registered(update: Update, context: CallbackContext) -> boo
 
 async def handle_weight_input(update: Update, context: CallbackContext):
     """Maneja la entrada del peso del usuario con validación mejorada"""
+    if 'awaiting_weight' not in context.user_data:
+        return  # No hacer nada si no estamos esperando un peso
+    
     user_id = update.message.from_user.id
     db = None
     try:
-        # Validación mejorada del input
         weight_str = update.message.text.replace(',', '.').strip()
         if not weight_str.replace('.', '').isdigit():
             raise ValueError("Formato inválido")
             
         weight = float(weight_str)
-        if not (30 <= weight <= 300):  # Rango más realista
+        if not (30 <= weight <= 300):
             raise ValueError("Peso fuera de rango")
             
         db = get_db_session()
@@ -55,33 +72,32 @@ async def handle_weight_input(update: Update, context: CallbackContext):
         
         if user:
             user.weight = weight
-            user.water_goal = weight * 35  # 35ml por kg
+            user.water_goal = weight * 35
             user.current_water = 0
             db.commit()
             
-            # Limpiar estado y confirmar
-            context.user_data.pop('awaiting_weight', None)
+            # Limpiar estado
+            del context.user_data['awaiting_weight']
             
             await update.message.reply_text(
-                f"✅ Peso registrado: {weight} kg\n"
+                f"✅ Peso actualizado: {weight} kg\n"
                 f"💧 Nueva meta diaria: {user.water_goal:.0f} ml",
                 reply_markup=water_progress_keyboard()
             )
             
-            # Reiniciar recordatorios
             await restart_water_reminders(context, user_id)
             
-    except ValueError as e:
-        logger.warning(f"Peso inválido: {update.message.text}")
+    except ValueError:
         await update.message.reply_text(
-            "⚠️ Ingresa un peso válido (30-300 kg). Ejemplo: 68.5 o 72,3",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 Menú principal", callback_data='main_menu')]
-            ])
+            "⚠️ Formato inválido. Ingresa solo el número (ej: 68.5)",
+            reply_markup=weight_input_keyboard()
         )
     except Exception as e:
         logger.error(f"Error registrando peso: {e}")
-        await update.message.reply_text("🔴 Error al registrar peso. Intenta más tarde.")
+        await update.message.reply_text(
+            "🔴 Error al registrar peso. Intenta más tarde.",
+            reply_markup=weight_input_keyboard()
+        )
     finally:
         if db:
             db.close()
@@ -121,30 +137,19 @@ async def handle_water_reminder(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
     
+    if not await check_user_registered(update, context):
+        return
+        
     db = None
     try:
-        if not await check_user_registered(update, context):
-            return
-            
         db = get_db_session()
         user = db.query(User).filter_by(telegram_id=query.from_user.id).first()
         
         if not user or not user.weight:
-            context.user_data['awaiting_weight'] = True
-            await query.edit_message_text(
-                "⚖️ *Configuración de Peso* ⚖️\n\n"
-                "Para calcular tu meta de agua, necesito saber tu peso actual.\n\n"
-                "Por favor ingresa tu peso en kg (ejemplo: 68.5):\n\n"
-                "⚠️ Solo el número, sin unidades o texto adicional.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("↩️ Cancelar", callback_data='main_menu')]
-                ]),
-                parse_mode='Markdown'
-            )
+            await handle_register_weight(update, context)
             return
     
         await show_water_progress(query, user)
-        
     except Exception as e:
         logger.error(f"Error en handle_water_reminder: {e}")
         await query.edit_message_text(

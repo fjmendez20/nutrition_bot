@@ -45,7 +45,7 @@ def water_progress_keyboard():
             InlineKeyboardButton("➕ 750ml", callback_data='water_amount_750'),
             InlineKeyboardButton("➕ 1L", callback_data='water_amount_1000')
         ],
-        [InlineKeyboardButton("⚖ Cambiar Peso", callback_data='register_weight')],  # Cambiado a register_weight
+        [InlineKeyboardButton("⚖ Actualizar Peso", callback_data='register_weight')],
         [InlineKeyboardButton("🔙 Menú Principal", callback_data='main_menu')]
     ]
     return InlineKeyboardMarkup(keyboard)
