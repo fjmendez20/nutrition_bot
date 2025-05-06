@@ -1,10 +1,12 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 from datetime import datetime
 import logging
 from typing import Optional
+
+# Importamos los modelos consolidados desde models.py
+from models import Base, User, WaterLog, PlanDownload, Payment, UserSettings
 
 # Configuración básica de logging
 logging.basicConfig()
@@ -18,72 +20,25 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
     DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
 
-Base = declarative_base()
-
-class User(Base):
-    __tablename__ = 'users'
-    
-    id = Column(Integer, primary_key=True)
-    telegram_id = Column(Integer, unique=True, nullable=False)
-    username = Column(String)
-    first_name = Column(String)
-    last_name = Column(String)
-    weight = Column(Float)
-    water_goal = Column(Float)  # en ml
-    current_water = Column(Float, default=0)  # en ml
-    is_premium = Column(Boolean, default=False)
-    premium_expiry = Column(DateTime)
-    registered_at = Column(DateTime, default=datetime.utcnow)
-    last_water_reminder = Column(DateTime)
-
-class WaterLog(Base):
-    __tablename__ = 'water_logs'
-    
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, nullable=False)
-    amount = Column(Float)  # en ml
-    timestamp = Column(DateTime, default=datetime.utcnow)
-    is_daily_reset = Column(Boolean, default=False)
-    
-class PlanDownload(Base):
-    __tablename__ = 'plan_downloads'
-    
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, nullable=False)
-    plan_type = Column(String)
-    downloaded_at = Column(DateTime, default=datetime.utcnow)
-
-class Payment(Base):
-    __tablename__ = 'payments'
-    
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, nullable=False)
-    amount = Column(Float)
-    currency = Column(String, default='USD')
-    payment_method = Column(String)
-    transaction_id = Column(String)
-    status = Column(String, default='pending')
-    created_at = Column(DateTime, default=datetime.utcnow)
-    completed_at = Column(DateTime)
-
 # Configuración del motor de base de datos
 engine = create_engine(
     DATABASE_URL,
     pool_size=5,
     max_overflow=10,
     pool_pre_ping=True,
-    pool_recycle=300
+    pool_recycle=300,
+    echo=False  # Cambiar a True para debug
 )
 
 # Crear todas las tablas si no existen
 if os.getenv('RESET_DB_ON_START', 'false').lower() == 'true':
-    Base.metadata.drop_all(engine)  # ¡Borrará todas las tablas!
-    print("⚠️ Base de datos reiniciada")
+    Base.metadata.drop_all(engine)  # ¡Cuidado! Esto borrará todas las tablas
+    logger.warning("⚠️ Base de datos reiniciada - TODAS LAS TABLAS ELIMINADAS")
 
 Base.metadata.create_all(engine)
 
 # Configuración de la sesión
-SessionFactory = sessionmaker(bind=engine)
+SessionFactory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 Session = scoped_session(SessionFactory)
 
 def get_db_session():
@@ -105,29 +60,127 @@ def get_or_create_user(telegram_id: int,
                      username: Optional[str] = None, 
                      first_name: Optional[str] = None, 
                      last_name: Optional[str] = None) -> User:
-    """Obtiene un usuario existente o crea uno nuevo"""
+    """Obtiene un usuario existente o crea uno nuevo con configuración inicial"""
     db = get_db_session()
     try:
         user = db.query(User).filter_by(telegram_id=telegram_id).first()
         
         if not user:
+            # Crear nuevo usuario
             user = User(
                 telegram_id=telegram_id,
                 username=username,
                 first_name=first_name,
                 last_name=last_name,
-                registered_at=datetime.utcnow()
+                registered_at=datetime.utcnow(),
+                language='es'  # Valor por defecto
             )
             db.add(user)
+            
+            # Crear configuración inicial
+            settings = UserSettings(
+                user_id=user.id,
+                water_reminders_enabled=True,
+                reminder_start_time='08:00',
+                reminder_end_time='22:00'
+            )
+            db.add(settings)
+            
             db.commit()
             logger.info(f"Nuevo usuario creado: {telegram_id}")
         else:
-            logger.info(f"Usuario existente encontrado: {telegram_id}")
+            # Actualizar datos si es necesario
+            update_needed = False
+            if username and user.username != username:
+                user.username = username
+                update_needed = True
+            if first_name and user.first_name != first_name:
+                user.first_name = first_name
+                update_needed = True
+            if last_name and user.last_name != last_name:
+                user.last_name = last_name
+                update_needed = True
+                
+            if update_needed:
+                db.commit()
+                logger.info(f"Usuario actualizado: {telegram_id}")
+            else:
+                logger.info(f"Usuario existente encontrado: {telegram_id}")
         
         return user
     except Exception as e:
         logger.error(f"Error en get_or_create_user: {str(e)}")
         db.rollback()
         raise
+    finally:
+        db.close()
+
+def get_user_settings(telegram_id: int) -> Optional[UserSettings]:
+    """Obtiene la configuración de un usuario"""
+    db = get_db_session()
+    try:
+        user = db.query(User).filter_by(telegram_id=telegram_id).first()
+        if user:
+            return db.query(UserSettings).filter_by(user_id=user.id).first()
+        return None
+    except Exception as e:
+        logger.error(f"Error en get_user_settings: {str(e)}")
+        raise
+    finally:
+        db.close()
+
+def reset_user_water(telegram_id: int) -> bool:
+    """Resetea el contador de agua para un usuario y registra el evento"""
+    db = get_db_session()
+    try:
+        user = db.query(User).filter_by(telegram_id=telegram_id).first()
+        if not user:
+            return False
+            
+        # Registrar el reset
+        log = WaterLog(
+            user_id=user.id,
+            amount=user.current_water,
+            is_daily_reset=True,
+            timestamp=datetime.utcnow()
+        )
+        db.add(log)
+        
+        # Resetear contador
+        user.current_water = 0
+        user.last_water_reminder = None
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error en reset_user_water: {str(e)}")
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+def log_water_consumption(telegram_id: int, amount: float) -> bool:
+    """Registra el consumo de agua para un usuario"""
+    db = get_db_session()
+    try:
+        user = db.query(User).filter_by(telegram_id=telegram_id).first()
+        if not user:
+            return False
+            
+        # Registrar consumo
+        log = WaterLog(
+            user_id=user.id,
+            amount=amount,
+            timestamp=datetime.utcnow()
+        )
+        db.add(log)
+        
+        # Actualizar contador
+        user.current_water += amount
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error en log_water_consumption: {str(e)}")
+        db.rollback()
+        return False
     finally:
         db.close()
