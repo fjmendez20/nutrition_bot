@@ -1,43 +1,28 @@
 import random
 import os
+import json
 from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext
 from database import get_db_session, User, PlanDownload
 from keyboards import nutrition_plans_keyboard, main_menu_keyboard
 from datetime import datetime
-#from mega import Mega
 import tempfile
 import logging
 from config import Config
 
-
-MEGA_FOLDER = 'nutrition_plans'
-
-# Mapeo de tipos de plan a carpetas
+# Mapeo de tipos de plan a carpetas (debe coincidir con los nombres de tus carpetas en categorias/)
 PLAN_FOLDERS = {
-    'weight_loss': 'weight_loss',
-    'weight_gain': 'weight_gain',
-    'maintenance': 'maintenance',
-    'sports': 'sports',
-    'metabolic': 'metabolic',
-    'aesthetic': 'aesthetic'
+    'weight_loss': 'Pérdida_de_Peso',
+    'weight_gain': 'Aumento_Muscular',
+    'maintenance': 'Mantenimiento',
+    'sports': 'Rendimiento_Deportivo',
+    'metabolic': 'Salud_Metabólica',
+    'aesthetic': 'Objetivos_Estéticos'
 }
 
-# Cliente MEGA (singleton)
-mega = None
-
-def initialize_mega():
-    """Inicializa la conexión con MEGA"""
-    global mega
-    if mega is None:
-        try:
-            mega = Mega()
-            mega.login(Config.MEGA_EMAIL, Config.MEGA_PASSWORD)
-            logging.info("Conexión con MEGA establecida")
-        except Exception as e:
-            logging.error(f"Error al conectar con MEGA: {str(e)}")
-            raise
+# Ruta a los archivos de IDs (debe estar en static/ids)
+IDS_FOLDER = os.path.join('static', 'ids')
 
 async def handle_nutrition_plan_selection(update: Update, context: CallbackContext):
     """Muestra el menú de selección de planes nutricionales"""
@@ -51,67 +36,42 @@ async def handle_nutrition_plan_selection(update: Update, context: CallbackConte
     )
 
 async def get_random_plan_file(plan_type):
-    """Obtiene un archivo PDF aleatorio de MEGA"""
+    """Obtiene un file_id aleatorio de los archivos de IDs"""
     try:
-        initialize_mega()
-        
         folder_name = PLAN_FOLDERS.get(plan_type)
         if not folder_name:
             logging.error(f"Tipo de plan no reconocido: {plan_type}")
             return None
         
-        # Obtener todos los archivos de MEGA
-        files = mega.get_files()
+        # Ruta al archivo de IDs para esta categoría
+        ids_file = os.path.join(IDS_FOLDER, f"{folder_name}.txt")
         
-        # Buscar la carpeta principal
-        root_folder = None
-        for file_id, file_data in files.items():
-            if file_data['a']['n'] == MEGA_FOLDER and file_data['t'] == 1:  # 1 = folder
-                root_folder = file_id
-                break
-        
-        if not root_folder:
-            logging.error(f"Carpeta principal '{MEGA_FOLDER}' no encontrada")
+        if not os.path.exists(ids_file):
+            logging.error(f"Archivo de IDs no encontrado: {ids_file}")
             return None
         
-        # Buscar la subcarpeta del plan
-        plan_folder = None
-        for file_id, file_data in files.items():
-            if file_data['a']['n'] == folder_name and file_data['t'] == 1 and file_data['p'] == root_folder:
-                plan_folder = file_id
-                break
+        # Cargar los IDs desde el archivo
+        with open(ids_file, 'r') as f:
+            ids_data = json.load(f)
         
-        if not plan_folder:
-            logging.error(f"Carpeta '{folder_name}' no encontrada")
+        if not ids_data:
+            logging.error(f"No hay IDs disponibles en {ids_file}")
             return None
         
-        # Filtrar archivos PDF en la subcarpeta
-        pdf_files = []
-        for file_id, file_data in files.items():
-            if file_data['p'] == plan_folder and file_data['t'] == 0:  # 0 = file
-                if file_data['a']['n'].lower().endswith('.pdf'):
-                    pdf_files.append((file_id, file_data))
+        # Seleccionar un archivo aleatorio
+        file_name, file_id = random.choice(list(ids_data.items()))
         
-        if not pdf_files:
-            logging.error(f"No hay PDFs en '{folder_name}'")
-            return None
-        
-        # Descargar archivo temporal
-        selected_file_id, selected_file_data = random.choice(pdf_files)
-        temp_dir = tempfile.gettempdir()
-        local_path = os.path.join(temp_dir, selected_file_data['a']['n'])
-        
-        logging.info(f"Descargando archivo: {selected_file_data['a']['n']}")
-        mega.download((selected_file_id, selected_file_data), dest_path=temp_dir)
-        
-        return local_path
+        return {
+            'file_id': file_id,
+            'file_name': file_name
+        }
     
     except Exception as e:
         logging.error(f"Error al obtener archivo: {str(e)}", exc_info=True)
         return None
 
 async def send_random_plan(update: Update, context: CallbackContext):
-    """Envía un plan nutricional aleatorio"""
+    """Envía un plan nutricional aleatorio usando los file_ids de Telegram"""
     query = update.callback_query
     await query.answer()
     
@@ -145,9 +105,9 @@ async def send_random_plan(update: Update, context: CallbackContext):
             return
     
     try:
-        plan_file_path = await get_random_plan_file(plan_type)
+        plan_data = await get_random_plan_file(plan_type)
         
-        if not plan_file_path:
+        if not plan_data:
             await query.edit_message_text(
                 "⚠️ No hay planes disponibles ahora.",
                 reply_markup=InlineKeyboardMarkup([
@@ -156,7 +116,7 @@ async def send_random_plan(update: Update, context: CallbackContext):
             )
             return
         
-        # Registrar y enviar
+        # Registrar descarga
         db.add(PlanDownload(
             user_id=user.id,
             plan_type=plan_type,
@@ -164,19 +124,13 @@ async def send_random_plan(update: Update, context: CallbackContext):
         ))
         db.commit()
         
-        with open(plan_file_path, 'rb') as file:
-            await context.bot.send_document(
-                chat_id=user_id,
-                document=file,
-                filename=os.path.basename(plan_file_path),
-                caption=f"📄 Plan de {plan_type.replace('_', ' ')}"
-            )
-        
-        # Limpiar temporal
-        try:
-            os.remove(plan_file_path)
-        except Exception as e:
-            logging.warning(f"Error eliminando temporal: {str(e)}")
+        # Enviar documento usando el file_id
+        await context.bot.send_document(
+            chat_id=user_id,
+            document=plan_data['file_id'],
+            filename=plan_data['file_name'],
+            caption=f"📄 Plan de {plan_type.replace('_', ' ')}"
+        )
         
         # Mensaje final
         await context.bot.send_message(  
