@@ -36,38 +36,41 @@ async def handle_nutrition_plan_selection(update: Update, context: CallbackConte
     )
 
 async def get_random_plan_file(plan_type):
-    """Obtiene un file_id aleatorio de los archivos de IDs"""
+    """Obtiene un file_id aleatorio con logging detallado"""
     try:
         folder_name = PLAN_FOLDERS.get(plan_type)
         if not folder_name:
             logging.error(f"Tipo de plan no reconocido: {plan_type}")
             return None
         
-        # Ruta al archivo de IDs para esta categoría
-        ids_file = os.path.join(IDS_FOLDER, f"{folder_name}.txt")
-        
-        if not os.path.exists(ids_file):
-            logging.error(f"Archivo de IDs no encontrado: {ids_file}")
+        ids_file = Path('static') / 'ids' / f"{folder_name}.txt"
+        logging.info(f"Buscando archivo de IDs en: {ids_file.absolute()}")
+
+        if not ids_file.exists():
+            logging.error(f"Archivo no encontrado: {ids_file}")
             return None
         
-        # Cargar los IDs desde el archivo
-        with open(ids_file, 'r') as f:
-            ids_data = json.load(f)
+        logging.info(f"Tamaño del archivo: {ids_file.stat().st_size} bytes")
         
-        if not ids_data:
-            logging.error(f"No hay IDs disponibles en {ids_file}")
+        try:
+            with open(ids_file, 'r') as f:
+                ids_data = json.load(f)
+                logging.info(f"Encontrados {len(ids_data)} IDs para {plan_type}")
+                
+                if not ids_data:
+                    logging.error("El archivo está vacío")
+                    return None
+                
+                file_name, file_id = random.choice(list(ids_data.items()))
+                logging.info(f"Seleccionado: {file_name} (ID: {file_id[:10]}...)")
+                return {'file_id': file_id, 'file_name': file_name}
+                
+        except json.JSONDecodeError as e:
+            logging.error(f"Error al decodificar JSON: {str(e)}")
             return None
-        
-        # Seleccionar un archivo aleatorio
-        file_name, file_id = random.choice(list(ids_data.items()))
-        
-        return {
-            'file_id': file_id,
-            'file_name': file_name
-        }
-    
+            
     except Exception as e:
-        logging.error(f"Error al obtener archivo: {str(e)}", exc_info=True)
+        logging.error(f"Error inesperado: {str(e)}", exc_info=True)
         return None
 
 async def send_random_plan(update: Update, context: CallbackContext):
