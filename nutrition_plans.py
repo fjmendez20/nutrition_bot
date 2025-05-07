@@ -36,7 +36,7 @@ async def handle_nutrition_plan_selection(update: Update, context: CallbackConte
     )
 
 async def get_random_plan_file(plan_type):
-    """Obtiene un file_id aleatorio con logging detallado"""
+    """Versión con manejo robusto de codificación"""
     try:
         folder_name = PLAN_FOLDERS.get(plan_type)
         if not folder_name:
@@ -44,33 +44,37 @@ async def get_random_plan_file(plan_type):
             return None
         
         ids_file = Path('static') / 'ids' / f"{folder_name}.txt"
-        logging.info(f"Buscando archivo de IDs en: {ids_file.absolute()}")
-
-        if not ids_file.exists():
-            logging.error(f"Archivo no encontrado: {ids_file}")
-            return None
         
-        logging.info(f"Tamaño del archivo: {ids_file.stat().st_size} bytes")
-        
+        # Abre el archivo con codificación latin-1 (que maneja bien los caracteres especiales)
         try:
-            with open(ids_file, 'r') as f:
-                ids_data = json.load(f)
-                logging.info(f"Encontrados {len(ids_data)} IDs para {plan_type}")
+            with open(ids_file, 'r', encoding='latin-1') as f:
+                content = f.read()
+                
+                # Intenta parsear el JSON
+                try:
+                    ids_data = json.loads(content)
+                except json.JSONDecodeError as e:
+                    logging.error(f"Error en JSON (posible BOM): {str(e)}")
+                    # Intenta eliminar BOM (Byte Order Mark) si existe
+                    content = content.encode('latin-1').decode('utf-8-sig')
+                    ids_data = json.loads(content)
                 
                 if not ids_data:
-                    logging.error("El archivo está vacío")
+                    logging.error(f"Archivo vacío: {ids_file}")
                     return None
                 
                 file_name, file_id = random.choice(list(ids_data.items()))
-                logging.info(f"Seleccionado: {file_name} (ID: {file_id[:10]}...)")
                 return {'file_id': file_id, 'file_name': file_name}
                 
-        except json.JSONDecodeError as e:
-            logging.error(f"Error al decodificar JSON: {str(e)}")
-            return None
-            
+        except UnicodeDecodeError:
+            # Fallback a utf-8 con manejo de errores
+            with open(ids_file, 'r', encoding='utf-8', errors='replace') as f:
+                ids_data = json.load(f)
+                file_name, file_id = random.choice(list(ids_data.items()))
+                return {'file_id': file_id, 'file_name': file_name}
+                
     except Exception as e:
-        logging.error(f"Error inesperado: {str(e)}", exc_info=True)
+        logging.error(f"Error inesperado en get_random_plan_file: {str(e)}", exc_info=True)
         return None
 
 async def send_random_plan(update: Update, context: CallbackContext):
