@@ -78,7 +78,7 @@ class UserSettings(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), unique=True)
     water_reminders_enabled = Column(Boolean, default=True)
-    reminder_start_time = Column(String(5), default='08:00')  # Formato HH:MM
+    reminder_start_time = Column(String(5), default='10:00')  # Formato HH:MM
     reminder_end_time = Column(String(5), default='22:00')    # Formato HH:MM
     reminder_interval = Column(Integer, default=60)  # Intervalo en minutos
     notification_preference = Column(String(20), default='silent')  # Ej: 'sound', 'vibrate', 'silent'

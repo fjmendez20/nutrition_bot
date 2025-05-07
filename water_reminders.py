@@ -171,7 +171,7 @@ async def restart_water_reminders(context: CallbackContext, user_id: int):
             context.job_queue.run_repeating(
                 callback=send_water_reminder,
                 interval=timedelta(minutes=interval),
-                first=timedelta(seconds=10),  # Primera notificación en 10 segundos
+                first=timedelta(seconds=3600),  # Primera notificación en 10 segundos
                 chat_id=user_id,
                 data={'user_id': user_id},
                 name=f"water_reminder_{user_id}"
@@ -340,7 +340,7 @@ async def start_water_reminders(context: CallbackContext, user_id: int):
         if not any(job.name == "daily_reset" for job in context.job_queue.jobs()):
             context.job_queue.run_daily(
                 callback=reset_daily_water,
-                time=datetime.strptime("00:00", "%H:%M").time(),
+                time=datetime.strptime("09:00", "%H:%M").time(),
                 name="daily_reset"
             )
         
