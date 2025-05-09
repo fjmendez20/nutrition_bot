@@ -13,7 +13,7 @@ from config import Config
 
 # Mapeo de tipos de plan a carpetas (debe coincidir con los nombres de tus carpetas en categorias/)
 PLAN_FOLDERS = {
-    'Perdida_de_Peso': 'Perdida_de_Peso',
+    'weight_loss': 'Perdida_de_Peso',
     'weight_gain': 'Aumento_Muscular',
     'maintenance': 'Mantenimiento',
     'sports': 'Rendimiento_Deportivo',
@@ -100,7 +100,7 @@ async def send_random_plan(update: Update, context: CallbackContext):
             PlanDownload.downloaded_at >= datetime.utcnow().date()
         ).count()
         
-        if downloads_today >= 3:
+        if downloads_today >= 7:
             await query.edit_message_text(
                 "⚠️ Límite de descargas alcanzado (3/día).\n"
                 "Hazte Premium para descargas ilimitadas.",
