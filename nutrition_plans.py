@@ -13,12 +13,12 @@ from config import Config
 
 # Mapeo de tipos de plan a carpetas (debe coincidir con los nombres de tus carpetas en categorias/)
 PLAN_FOLDERS = {
-    'weight_loss': 'Pérdida_de_Peso',
+    'weight_loss': 'Perdida_de_Peso',
     'weight_gain': 'Aumento_Muscular',
     'maintenance': 'Mantenimiento',
     'sports': 'Rendimiento_Deportivo',
-    'metabolic': 'Salud_Metabólica',
-    'aesthetic': 'Objetivos_Estéticos'
+    'metabolic': 'Salud_Metabolica',
+    'aesthetic': 'Objetivos_Esteticos'
 }
 
 # Ruta a los archivos de IDs (debe estar en static/ids)
