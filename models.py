@@ -2,6 +2,14 @@ from datetime import datetime
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
+from zoneinfo import ZoneInfo  # Para Python 3.9+
+
+# Configuración de zona horaria UTC-4
+UTC_4 = ZoneInfo("America/Puerto_Rico")
+
+def utcnow():
+    """Función helper para obtener datetime actual en UTC-4"""
+    return datetime.now(UTC_4)
 
 Base = declarative_base()
 
@@ -19,7 +27,7 @@ class User(Base):
     current_water = Column(Float, default=0)  # Agua consumida hoy en ml
     is_premium = Column(Boolean, default=False)
     premium_expiry = Column(DateTime, nullable=True)
-    registered_at = Column(DateTime, default=datetime.utcnow)
+    registered_at = Column(DateTime, default=utcnow)
     last_water_reminder = Column(DateTime, nullable=True)
     language = Column(String(2), default='es')  # Código de idioma (ej: 'es', 'en')
     
@@ -36,7 +44,7 @@ class WaterLog(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     amount = Column(Float, nullable=False)  # Cantidad en ml
-    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    timestamp = Column(DateTime, default=utcnow, index=True)
     is_daily_reset = Column(Boolean, default=False)  # Indica si es un registro de reset
     
     # Relación
@@ -49,7 +57,7 @@ class PlanDownload(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     plan_type = Column(String(50), nullable=False)  # Ej: 'keto', 'vegetariano', etc.
-    downloaded_at = Column(DateTime, default=datetime.utcnow)
+    downloaded_at = Column(DateTime, default=utcnow)
     
     # Relación
     user = relationship("User", back_populates="plan_downloads")
@@ -65,7 +73,7 @@ class Payment(Base):
     payment_method = Column(String(20))  # Ej: 'stripe', 'paypal', etc.
     transaction_id = Column(String(100), unique=True)
     status = Column(String(20), default='pending')  # Ej: 'pending', 'completed', 'failed'
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     completed_at = Column(DateTime, nullable=True)
     
     # Relación
@@ -78,8 +86,8 @@ class UserSettings(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), unique=True)
     water_reminders_enabled = Column(Boolean, default=True)
-    reminder_start_time = Column(String(5), default='10:00')  # Formato HH:MM
-    reminder_end_time = Column(String(5), default='22:00')    # Formato HH:MM
+    reminder_start_time = Column(String(5), default='08:00')  # Formato HH:MM (UTC-4)
+    reminder_end_time = Column(String(5), default='22:00')    # Formato HH:MM (UTC-4)
     reminder_interval = Column(Integer, default=60)  # Intervalo en minutos
     notification_preference = Column(String(20), default='silent')  # Ej: 'sound', 'vibrate', 'silent'
     

@@ -1,12 +1,12 @@
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
-from datetime import datetime
 import logging
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 # Importamos los modelos consolidados desde models.py
-from models import Base, User, WaterLog, PlanDownload, Payment, UserSettings
+from models import Base, User, WaterLog, PlanDownload, Payment, UserSettings, utcnow
 
 # Configuración básica de logging
 logging.basicConfig()
@@ -72,7 +72,7 @@ def get_or_create_user(telegram_id: int,
                 username=username,
                 first_name=first_name,
                 last_name=last_name,
-                registered_at=datetime.utcnow(),
+                registered_at=utcnow(),
                 language='es'  # Valor por defecto
             )
             db.add(user)
@@ -81,8 +81,8 @@ def get_or_create_user(telegram_id: int,
             settings = UserSettings(
                 user_id=user.id,
                 water_reminders_enabled=True,
-                reminder_start_time='08:00',
-                reminder_end_time='22:00'
+                reminder_start_time='08:00',  # 8 AM UTC-4
+                reminder_end_time='22:00'     # 10 PM UTC-4
             )
             db.add(settings)
             
@@ -142,7 +142,7 @@ def reset_user_water(telegram_id: int) -> bool:
             user_id=user.id,
             amount=user.current_water,
             is_daily_reset=True,
-            timestamp=datetime.utcnow()
+            timestamp=utcnow()
         )
         db.add(log)
         
@@ -170,7 +170,7 @@ def log_water_consumption(telegram_id: int, amount: float) -> bool:
         log = WaterLog(
             user_id=user.id,
             amount=amount,
-            timestamp=datetime.utcnow()
+            timestamp=utcnow()
         )
         db.add(log)
         

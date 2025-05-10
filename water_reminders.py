@@ -2,16 +2,30 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext
 from database import get_db_session, User, WaterLog, UserSettings
 from keyboards import water_amount_keyboard, water_progress_keyboard, water_reminder_keyboard, weight_input_keyboard
-from datetime import datetime, timedelta
-import logging
+from datetime import datetime, timedelta, time
 from typing import Optional
+from zoneinfo import ZoneInfo
+import logging
 
 logger = logging.getLogger(__name__)
 
+# Configuración de zona horaria (UTC-4)
+TZ = ZoneInfo("America/Puerto_Rico")  # Ejemplo de zona UTC-4 (también sirve America/Santiago en horario estándar)
+
+def get_local_time():
+    """Obtiene la hora actual en UTC-4"""
+    return datetime.now(TZ)
+
+
 async def reset_daily_water(context: CallbackContext):
-    """Reinicia el contador de agua para todos los usuarios a medianoche"""
+    """Reinicia el contador de agua para todos los usuarios a medianoche UTC-4"""
     db = get_db_session()
     try:
+        # Solo ejecutar si es medianoche en UTC-4
+        now = get_local_time()
+        if now.hour != 0 or now.minute > 5:  # Ventana de 5 minutos después de medianoche
+            return
+            
         users = db.query(User).filter(User.water_goal.isnot(None)).all()
         
         if not users:
@@ -20,12 +34,10 @@ async def reset_daily_water(context: CallbackContext):
             
         for user in users:
             try:
-                # Verificar si el usuario tiene recordatorios activados
                 settings = db.query(UserSettings).filter_by(user_id=user.id).first()
                 if settings and not settings.water_reminders_enabled:
                     continue
                 
-                # Registrar el reset
                 log = WaterLog(
                     user_id=user.id,
                     amount=user.current_water,
@@ -34,11 +46,9 @@ async def reset_daily_water(context: CallbackContext):
                 )
                 db.add(log)
                 
-                # Resetear contador
                 user.current_water = 0
                 user.last_water_reminder = None
                 
-                # Reiniciar recordatorios si están habilitados
                 if settings and settings.water_reminders_enabled:
                     await restart_water_reminders(context, user.telegram_id)
                     
@@ -47,13 +57,14 @@ async def reset_daily_water(context: CallbackContext):
                 continue
                 
         db.commit()
-        logger.info(f"Reinicio diario completado para {len(users)} usuarios")
+        logger.info(f"Reinicio diario completado para {len(users)} usuarios a las {now}")
         
     except Exception as e:
         logger.error(f"Error crítico en reset_daily_water: {e}")
-        if db: db.rollback()
+        db.rollback()
     finally:
-        if db: db.close()
+        db.close()
+        
 
 async def handle_register_weight(update: Update, context: CallbackContext):
     """Manejador para el botón de registro de peso"""
@@ -151,7 +162,7 @@ async def handle_weight_input(update: Update, context: CallbackContext):
             db.close()
             
 async def restart_water_reminders(context: CallbackContext, user_id: int):
-    """Reinicia los recordatorios considerando la configuración del usuario"""
+    """Reinicia los recordatorios en horario UTC-4"""
     db = get_db_session()
     try:
         user = db.query(User).filter_by(telegram_id=user_id).first()
@@ -166,21 +177,31 @@ async def restart_water_reminders(context: CallbackContext, user_id: int):
         
         # Programar nuevos recordatorios si están habilitados
         if not settings or settings.water_reminders_enabled:
-            interval = settings.reminder_interval if settings else 60  # Default: 60 minutos
+            interval = settings.reminder_interval if settings else 60  # minutos
+            
+            # Calcular primera ejecución (dentro de horario UTC-4)
+            now = get_local_time()
+            start_time = time(8, 0)  # 8:00 AM UTC-4
+            first_run = datetime.combine(now.date(), start_time, tzinfo=TZ)
+            
+            # Si ya pasó la hora de hoy, programar para mañana
+            if now.time() > start_time:
+                first_run += timedelta(days=1)
             
             context.job_queue.run_repeating(
                 callback=send_water_reminder,
                 interval=timedelta(minutes=interval),
-                first=timedelta(seconds=3600),  # Primera notificación en 10 segundos
+                first=first_run,
                 chat_id=user_id,
                 data={'user_id': user_id},
                 name=f"water_reminder_{user_id}"
             )
-            logger.info(f"Recordatorios programados para usuario {user_id} cada {interval} minutos")
+            logger.info(f"Recordatorios programados para usuario {user_id} cada {interval} minutos (UTC-4)")
     except Exception as e:
         logger.error(f"Error reiniciando recordatorios: {e}")
     finally:
-        if db: db.close()
+        db.close()
+
 
 
 def calculate_water_goal(weight_kg: float) -> float:
@@ -351,7 +372,7 @@ async def start_water_reminders(context: CallbackContext, user_id: int):
         raise
 
 async def send_water_reminder(context: CallbackContext):
-    """Envía recordatorios considerando la configuración del usuario"""
+    """Envía recordatorios respetando horario UTC-4"""
     job = context.job
     user_id = job.data['user_id']
     db = get_db_session()
@@ -366,23 +387,29 @@ async def send_water_reminder(context: CallbackContext):
         if settings and not settings.water_reminders_enabled:
             return
             
-        # Verificar horario permitido
-        now = datetime.now().time()
-        if settings:
-            start = datetime.strptime(settings.reminder_start_time, "%H:%M").time()
-            end = datetime.strptime(settings.reminder_end_time, "%H:%M").time()
-            if not (start <= now <= end):
-                return
-                
+        # Verificar horario permitido (08:00-22:00 UTC-4)
+        now = get_local_time().time()
+        start = time(8, 0)  # 8:00 AM UTC-4
+        end = time(22, 0)   # 10:00 PM UTC-4
+        
+        if not (start <= now <= end):
+            return
+            
         # Verificar si ya alcanzó la meta
         if user.current_water >= user.water_goal:
             return
             
+        # Enviar recordatorio
+        progress = min((user.current_water / user.water_goal) * 100, 100)
+        progress_bar = "🟩" * int(progress / 10) + "⬜" * (10 - int(progress / 10))
+        
         await context.bot.send_message(
             chat_id=user_id,
-            text="💧 ⏰ **Recordatorio de Hidratación** ⏰ 💧\n\n"
-                 "Es hora de tomar agua para mantenerte hidratado/a!\n\n"
-                 f"Progreso actual: {user.current_water:.0f}/{user.water_goal:.0f} ml",
+            text=f"💧 ⏰ *Recordatorio de Hidratación* ⏰ 💧\n\n"
+                 f"Es hora de tomar agua para mantenerte hidratado/a!\n\n"
+                 f"Progreso actual: {user.current_water:.0f}/{user.water_goal:.0f} ml\n"
+                 f"{progress_bar} {progress:.0f}%\n\n"
+                 f"🕘 Hora actual: {get_local_time().strftime('%H:%M')} (UTC-4)",
             reply_markup=water_reminder_keyboard(),
             parse_mode='Markdown'
         )
@@ -391,7 +418,7 @@ async def send_water_reminder(context: CallbackContext):
     except Exception as e:
         logger.error(f"Error enviando recordatorio a {user_id}: {e}")
     finally:
-        if db: db.close()
+        db.close()
         
 async def cancel_water_reminders(update: Update, context: CallbackContext):
     """Cancela recordatorios y actualiza la configuración"""
