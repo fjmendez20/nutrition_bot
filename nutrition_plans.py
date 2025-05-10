@@ -13,8 +13,8 @@ from config import Config
 
 # Mapeo de tipos de plan a carpetas (debe coincidir con los nombres de tus carpetas en categorias/)
 PLAN_FOLDERS = {
-    'weight_loss': 'Perdida_de_Peso',
-    'weight_gain': 'Aumento_Muscular',
+    'weightL': 'Perdida_de_Peso',
+    'weightG': 'Aumento_Muscular',
     'maintenance': 'Mantenimiento',
     'sports': 'Rendimiento_Deportivo',
     'metabolic': 'Salud_Metabolica',

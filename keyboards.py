@@ -53,8 +53,8 @@ def water_progress_keyboard():
 def nutrition_plans_keyboard():
     """Teclado para selección de planes nutricionales"""
     keyboard = [
-        [InlineKeyboardButton("📉 Pérdida de Peso", callback_data='plan_weight_loss')],
-        [InlineKeyboardButton("📈 Aumento Muscular", callback_data='plan_weight_gain')],
+        [InlineKeyboardButton("📉 Pérdida de Peso", callback_data='plan_weightL')],
+        [InlineKeyboardButton("📈 Aumento Muscular", callback_data='plan_weightG')],
         [InlineKeyboardButton("⚖ Mantenimiento", callback_data='plan_maintenance')],
         [InlineKeyboardButton("🏃 Rendimiento Deportivo", callback_data='plan_sports')],
         [InlineKeyboardButton("❤ Salud Metabólica", callback_data='plan_metabolic')],
