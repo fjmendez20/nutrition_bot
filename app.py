@@ -161,7 +161,7 @@ def keep_alive():
         try:
             if hasattr(Config, 'RENDER_DOMAIN') and Config.RENDER_DOMAIN:
                 url = f'https://{Config.RENDER_DOMAIN}/health'
-                response = requests.get(url, timeout=10)
+                response = requests.get(url, timeout=40)
                 logger.info(f"Keep-alive ping. Status: {response.status_code}")
             else:
                 logger.warning("RENDER_DOMAIN no configurado")
