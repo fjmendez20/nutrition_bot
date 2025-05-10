@@ -100,7 +100,7 @@ async def send_random_plan(update: Update, context: CallbackContext):
             PlanDownload.downloaded_at >= datetime.utcnow().date()
         ).count()
         
-        if downloads_today >= 7:
+        if downloads_today >= 3:
             await query.edit_message_text(
                 "⚠️ Límite de descargas alcanzado (3/día).\n"
                 "Hazte Premium para descargas ilimitadas.",
